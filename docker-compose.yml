@@ -1,0 +1,987 @@
+# Self-host: Bellamy Book – pull pre-built images from Docker Hub only (no build).
+# Set DOCKER_REGISTRY and IMAGE_TAG in .env (default: bellamy31, latest).
+# Copy .env.example to .env and configure. See README.md.
+
+version: '3.9'
+
+services:
+  # ---------------------------------------------------------------------------
+  # TRAEFIK (reverse proxy) – optional; start with: docker compose up -d traefik
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-traefik
+    restart: unless-stopped
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+      - "8082:8082"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik_logs:/var/log/traefik
+      - traefik_letsencrypt:/letsencrypt
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_API_VERSION=1.44
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      # Dashboard on port 8080: by hostname (if you expose via tunnel) or by VPS IP only (no tunnel)
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_HOST:-dashboard.bellamybook.com}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=dashboard"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      # Dashboard on 8080 by VPS IP only – set TRAEFIK_DASHBOARD_IP in .env (e.g. 192.168.1.40) so http://VPS_IP:8080 works; do not expose 8080 in Cloudflare
+      - "traefik.http.routers.traefik-dashboard-ip.rule=Host(`${TRAEFIK_DASHBOARD_IP:-192.168.1.40}`)"
+      - "traefik.http.routers.traefik-dashboard-ip.entrypoints=dashboard"
+      - "traefik.http.routers.traefik-dashboard-ip.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard-ip.priority=5"
+      # Dashboard on HTTP/HTTPS (only if you expose these hostnames)
+      - "traefik.http.routers.traefik-dashboard-web.rule=Host(`${TRAEFIK_DASHBOARD_HOST:-dashboard.bellamybook.com}`)"
+      - "traefik.http.routers.traefik-dashboard-web.entrypoints=web"
+      - "traefik.http.routers.traefik-dashboard-web.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard-secure.rule=Host(`${TRAEFIK_DASHBOARD_HOST:-dashboard.bellamybook.com}`)"
+      - "traefik.http.routers.traefik-dashboard-secure.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard-secure.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard-secure.tls=true"
+
+  # ---------------------------------------------------------------------------
+  # INFRASTRUCTURE (aligned with dockerLocalENV: primary/replica, opensearch-config, mongo keyfile)
+  # ---------------------------------------------------------------------------
+  postgres-primary:
+    image: postgres:15
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-FacebookDb}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    volumes:
+      - ./primary:/docker-entrypoint-initdb.d:ro
+      - pg_primary_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-FacebookDb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  postgres-replica:
+    image: postgres:15
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    env_file: .env
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "5433:5432"
+    command: >
+      bash -c "
+        set -e
+        export PGPASSWORD=\"$${REPLICATION_PASSWORD}\"
+        echo 'Waiting for primary to accept connections...'
+        until pg_isready -h postgres-primary -p 5432; do sleep 2; done
+        echo 'Waiting for replication user myuser (primary init may still be running)...'
+        for i in \$(seq 1 60); do
+          rm -rf /var/lib/postgresql/data/*
+          if gosu postgres pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U myuser -Fp -Xs -P -R; then
+            echo 'pg_basebackup succeeded.'
+            break
+          fi
+          echo \"Attempt \$i/60: basebackup failed, retrying in 5s...\"
+          sleep 5
+        done
+        if [ ! -f /var/lib/postgresql/data/postgresql.conf ]; then
+          echo 'ERROR: pg_basebackup did not succeed after 60 attempts (check REPLICATION_PASSWORD and primary init)'
+          exit 1
+        fi
+        cp /tmp/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf
+        echo \"listen_addresses='*'\" >> /var/lib/postgresql/data/postgresql.conf
+        chown -R postgres:postgres /var/lib/postgresql/data
+        chmod 700 /var/lib/postgresql/data
+        exec gosu postgres postgres
+      "
+    volumes:
+      - ./replica/pg_hba.conf:/tmp/pg_hba.conf:ro
+      - pg_replica_data:/var/lib/postgresql/data
+    networks:
+      - appnet
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-redis
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server $${REDIS_PASSWORD:+--requirepass $$REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+-a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-keyfile-init:
+    image: mongo:6
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-mongo-keyfile-init
+    restart: "no"
+    entrypoint: >
+      bash -c "
+        set -e
+        if [ ! -f /tmp/keyfile ]; then
+          echo 'ERROR: Source keyfile /tmp/keyfile not found';
+          exit 1
+        fi
+        if [ ! -f /data/keyfile ]; then
+          echo 'Initializing mongo keyfile...';
+          cp /tmp/keyfile /data/keyfile &&
+          chown 999:999 /data/keyfile &&
+          chmod 600 /data/keyfile &&
+          echo 'Keyfile initialized successfully';
+          ls -l /data/keyfile
+        else
+          echo 'Mongo keyfile already exists, verifying...';
+          chown 999:999 /data/keyfile || true
+          chmod 600 /data/keyfile || true
+          ls -l /data/keyfile
+        fi
+      "
+    volumes:
+      - mongo_keyfile:/data
+      - ./mongo-keyfile:/tmp/keyfile:ro
+    networks:
+      - appnet
+
+  mongodb:
+    image: mongo:6
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-mongodb
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--keyFile", "/data/keyfile", "--bind_ip_all"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_keyfile:/data
+    ports:
+      - "27017:27017"
+    networks:
+      - appnet
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    # Healthy when: replica not init (so init can run), or PRIMARY, or RECOVERING/STARTUP2 (redeploy: init can start and wait for PRIMARY)
+    # Healthy only when replica not initialized (so init can run) or when PRIMARY (so API can start after init).
+    # Do not mark RECOVERING/STARTUP2 as healthy so we never start API until PRIMARY is elected.
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh mongodb://localhost:27017/admin -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --quiet --eval 'try { var s=db.adminCommand(\"replSetGetStatus\"); if(!s.ok||!s.members||!s.members[0]) quit(0); var st=s.members[0].stateStr; if(st===\"PRIMARY\") quit(0); quit(1); } catch(e) { quit(0); }'"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  mongo-init-replica:
+    image: mongo:6
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/scripts/mongo-init-replica.sh"]
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: "27017"
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MAX_WAIT: "300"
+    volumes:
+      - ./scripts/mongo-init-replica.sh:/scripts/mongo-init-replica.sh:ro
+    networks:
+      - appnet
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-/}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - appnet
+    # No healthcheck: Confluent image has no curl/nc in PATH; ZK starts in ~1s (see logs). Kafka has long start_period instead.
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID:-1}
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 || exit 1"]
+      interval: 15s
+      timeout: 25s
+      retries: 30
+      start_period: 180s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_started
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Waiting for Kafka to be ready..."
+        for i in $$(seq 1 60); do
+          if kafka-broker-api-versions --bootstrap-server kafka:29092 2>/dev/null; then
+            echo "Kafka is ready."
+            break
+          fi
+          if [ $$i -eq 60 ]; then
+            echo "Kafka did not become ready in time." >&2
+            exit 1
+          fi
+          echo "Attempt $$i/60: Kafka not ready, retrying in 5s..."
+          sleep 5
+        done
+        sleep 5
+        for topic in user_interacted content_created content_updated content_deleted hashtag_events; do
+          kafka-topics --create --topic "$$topic" --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 2>/dev/null || true
+        done
+        echo "Kafka topics ready."
+    networks:
+      - appnet
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      xpack.security.enabled: "false"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  elasticsearch-init:
+    image: curlimages/curl:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-elasticsearch-init
+    restart: "no"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      OPENSEARCH_URL: http://elasticsearch:9200
+      # Log retention: delete indices older than N days (default 5). Reduces OpenSearch/Elasticsearch data.
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-5}
+    volumes:
+      - ./opensearch-config/setup-log-retention-docker.sh:/setup-log-retention.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chmod +x /setup-log-retention.sh
+        /setup-log-retention.sh
+    networks:
+      - appnet
+
+  # Kibana: UI for Elasticsearch (app logs, search). No code change; infra only.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-kibana
+    restart: unless-stopped
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - appnet
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kibana.rule=Host(`${TRAEFIK_KIBANA_HOST:-kibana.bellamybook.com}`)"
+      - "traefik.http.routers.kibana.entrypoints=web"
+      - "traefik.http.routers.kibana.service=kibana"
+      - "traefik.http.services.kibana.loadbalancer.server.port=5601"
+      - "traefik.http.routers.kibana-secure.rule=Host(`${TRAEFIK_KIBANA_HOST:-kibana.bellamybook.com}`)"
+      - "traefik.http.routers.kibana-secure.entrypoints=websecure"
+      - "traefik.http.routers.kibana-secure.service=kibana"
+      - "traefik.http.routers.kibana-secure.tls=true"
+
+  minio:
+    image: minio/minio:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - appnet
+    healthcheck:
+      # Use curl instead of wget (curl is available in minio image)
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  minio-init:
+    image: minio/mc
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "sleep 5 && mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}
+      && mc mb myminio/public --ignore-existing && mc mb myminio/private --ignore-existing
+      && mc anonymous set download myminio/public 2>/dev/null || true"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - appnet
+
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    networks:
+      - appnet
+    healthcheck:
+      # Use cypher-shell to check Neo4j (built-in tool, no external dependencies)
+      # Extract password from NEO4J_AUTH env var (format: neo4j/password)
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # DATABASE MIGRATION (run once before first start; see README.md)
+  # ---------------------------------------------------------------------------
+  db-migration:
+    image: ${DOCKER_REGISTRY}/bellamybook-db-migration:${IMAGE_TAG}
+    restart: "no"
+    env_file: .env
+    environment:
+      ConnectionStrings__PrimaryConnectionString: ${ConnectionStrings__PrimaryConnectionString}
+      ConnectionStrings__ReadOnlyConnectionString: ${ConnectionStrings__ReadOnlyConnectionString}
+      ConnectionStrings__MigrationDbConnectionString: ${ConnectionStrings__MigrationDbConnectionString}
+      ConnectionStrings__MongoDbConnectionString: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
+      MongoDb__DatabaseName: ${MongoDb__Database:-App}
+      ASPNETCORE_ENVIRONMENT: Production
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - appnet
+
+  # ---------------------------------------------------------------------------
+  # BACKEND API
+  # ---------------------------------------------------------------------------
+  api:
+    image: ${DOCKER_REGISTRY}/bellamybook-api:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      # Ensure MongoDB uses directConnection=true (required for single-node replica set; avoids "not primary" errors)
+      MongoDb__ConnectionString: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
+      MongoDb__Database: ${MongoDb__Database:-App}
+      # Kafka – API publishes interaction/content events; required for InteractionWorker, ScoringWorker, etc.
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      KafkaTopics__ContentCreatedTopic: ${KafkaTopics__ContentCreatedTopic:-content_created}
+      KafkaTopics__ContentUpdatedTopic: ${KafkaTopics__ContentUpdatedTopic:-content_updated}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+      KafkaTopics__HashtagEventsTopic: ${KafkaTopics__HashtagEventsTopic:-hashtag_events}
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      redis: { condition: service_started }
+      mongodb: { condition: service_healthy }
+      mongo-init-replica: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+      elasticsearch: { condition: service_healthy }
+      minio: { condition: service_started }
+      neo4j: { condition: service_healthy }
+    ports:
+      - "5000:80"
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      # Lower priority so /hubs/* routes (websocket-worker, chat-worker) match first
+      - "traefik.http.routers.api.priority=1"
+      - "traefik.http.routers.api.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api.service=api"
+      - "traefik.http.services.api.loadbalancer.server.port=80"
+      - "traefik.http.routers.api-secure.priority=1"
+      - "traefik.http.routers.api-secure.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`)"
+      - "traefik.http.routers.api-secure.entrypoints=websecure"
+      - "traefik.http.routers.api-secure.service=api"
+      - "traefik.http.routers.api-secure.tls=true"
+      - "traefik.http.services.api.loadbalancer.server.scheme=http"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ---------------------------------------------------------------------------
+  # WORKERS
+  # ---------------------------------------------------------------------------
+  websocket-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-websocket-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-websocket-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+    depends_on:
+      api: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      # SignalR notification/onlineusers hubs at same host as API (priority > api so path wins)
+      - "traefik.http.routers.websocket.priority=100"
+      - "traefik.http.routers.websocket.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`) && (PathPrefix(`/hubs/notification`) || PathPrefix(`/hubs/onlineusers`))"
+      - "traefik.http.routers.websocket.entrypoints=web"
+      - "traefik.http.routers.websocket.service=websocket"
+      - "traefik.http.routers.websocket-secure.priority=100"
+      - "traefik.http.routers.websocket-secure.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`) && (PathPrefix(`/hubs/notification`) || PathPrefix(`/hubs/onlineusers`))"
+      - "traefik.http.routers.websocket-secure.entrypoints=websecure"
+      - "traefik.http.routers.websocket-secure.service=websocket"
+      - "traefik.http.routers.websocket-secure.tls=true"
+      - "traefik.http.services.websocket.loadbalancer.server.port=80"
+      - "traefik.http.services.websocket.loadbalancer.server.scheme=http"
+
+  chat-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-chat-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-chat-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      SignalR__ApiBaseUrl: http://api:80
+      SignalR__ChatHubUrl: http://api:80/hubs/chat
+    depends_on:
+      api: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      # SignalR chat hubs at same host as API (priority > api so path wins)
+      - "traefik.http.routers.chat.priority=100"
+      - "traefik.http.routers.chat.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`) && (PathPrefix(`/hubs/chat`) || PathPrefix(`/hubs/chat-online`))"
+      - "traefik.http.routers.chat.entrypoints=web"
+      - "traefik.http.routers.chat.service=chat"
+      - "traefik.http.routers.chat-secure.priority=100"
+      - "traefik.http.routers.chat-secure.rule=Host(`${TRAEFIK_API_HOST:-api.bellamybook.com}`) && (PathPrefix(`/hubs/chat`) || PathPrefix(`/hubs/chat-online`))"
+      - "traefik.http.routers.chat-secure.entrypoints=websecure"
+      - "traefik.http.routers.chat-secure.service=chat"
+      - "traefik.http.routers.chat-secure.tls=true"
+      - "traefik.http.services.chat.loadbalancer.server.port=80"
+      - "traefik.http.services.chat.loadbalancer.server.scheme=http"
+
+  interaction-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-interaction-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-interaction-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      # Each worker MUST have its own GroupId so it receives every message (do not use api-group)
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: interaction-worker-group
+      Kafka__ClientId: interaction-worker
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      redis: { condition: service_started }
+      mongodb: { condition: service_healthy }
+      mongo-init-replica: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  scoring-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-scoring-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-scoring-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: scoring-worker-group
+      Kafka__ClientId: scoring-worker
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      KafkaTopics__ContentCreatedTopic: ${KafkaTopics__ContentCreatedTopic:-content_created}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  trending-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-trending-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-trending-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: trending-worker-group
+      Kafka__ClientId: trending-worker
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      KafkaTopics__ContentCreatedTopic: ${KafkaTopics__ContentCreatedTopic:-content_created}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      redis: { condition: service_started }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  graph-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-graph-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-graph-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: graph-worker-group
+      Kafka__ClientId: graph-worker
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+    depends_on:
+      neo4j: { condition: service_healthy }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  hashtag-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-hashtag-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-hashtag-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: hashtag-worker-group
+      Kafka__ClientId: hashtag-worker
+      KafkaTopics__ContentCreatedTopic: ${KafkaTopics__ContentCreatedTopic:-content_created}
+      KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  elasticsearch-sync-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-elasticsearch-sync-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-elasticsearch-sync-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      Kafka__BootstrapServers: ${Kafka__BootstrapServers:-kafka:29092}
+      Kafka__GroupId: elasticsearch-sync-worker-group
+      Kafka__ClientId: elasticsearch-sync-worker
+      KafkaTopics__ContentCreatedTopic: ${KafkaTopics__ContentCreatedTopic:-content_created}
+      KafkaTopics__ContentUpdatedTopic: ${KafkaTopics__ContentUpdatedTopic:-content_updated}
+      KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
+      KafkaTopics__HashtagEventsTopic: ${KafkaTopics__HashtagEventsTopic:-hashtag_events}
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+      kafka: { condition: service_started }
+      kafka-init: { condition: service_completed_successfully }
+    networks:
+      - appnet
+
+  media-processing-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-media-processing-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-media-processing-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      minio: { condition: service_started }
+    networks:
+      - appnet
+
+  expo-push-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-expo-push-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-expo-push-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - appnet
+
+  webpush-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-webpush-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-webpush-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      postgres-primary: { condition: service_healthy }
+    networks:
+      - appnet
+
+  blog-autogen-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-blog-autogen-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-blog-autogen-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+    depends_on:
+      postgres-primary: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      api: { condition: service_healthy }
+    networks:
+      - appnet
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND (build uses dockerProd/.env.frontend copied as .env in image)
+  # ---------------------------------------------------------------------------
+  frontend:
+    image: ${DOCKER_REGISTRY}/bellamybook-frontend:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-frontend
+    restart: unless-stopped
+    environment:
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
+      DOCS_PUBLIC_URL: ${DOCS_PUBLIC_URL:-}
+      Minio__PublicUrl: ${Minio__PublicUrl:-}
+    # Use 8081 so Traefik can bind to 80; without Traefik use http://localhost:8081
+    ports:
+      - "8081:80"
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${TRAEFIK_FRONTEND_HOST:-bellamybook.com}`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.service=frontend"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.routers.frontend-secure.rule=Host(`${TRAEFIK_FRONTEND_HOST:-bellamybook.com}`)"
+      - "traefik.http.routers.frontend-secure.entrypoints=websecure"
+      - "traefik.http.routers.frontend-secure.service=frontend"
+      - "traefik.http.routers.frontend-secure.tls=true"
+
+  # ---------------------------------------------------------------------------
+  # ADMIN (build uses dockerProd/.env.admin copied as .env in image)
+  # ---------------------------------------------------------------------------
+  admin:
+    image: ${DOCKER_REGISTRY}/bellamybook-admin:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-admin
+    restart: unless-stopped
+    environment:
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
+      Minio__PublicUrl: ${Minio__PublicUrl:-}
+    # Use 8084 so Traefik can use 8080 for dashboard; without Traefik use http://localhost:8084
+    ports:
+      - "8084:80"
+    networks:
+      - appnet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin.rule=Host(`${TRAEFIK_ADMIN_HOST:-admin.bellamybook.com}`)"
+      - "traefik.http.routers.admin.entrypoints=web"
+      - "traefik.http.routers.admin.service=admin"
+      - "traefik.http.services.admin.loadbalancer.server.port=80"
+      - "traefik.http.routers.admin-secure.rule=Host(`${TRAEFIK_ADMIN_HOST:-admin.bellamybook.com}`)"
+      - "traefik.http.routers.admin-secure.entrypoints=websecure"
+      - "traefik.http.routers.admin-secure.service=admin"
+      - "traefik.http.routers.admin-secure.tls=true"
+
+  # ---------------------------------------------------------------------------
+  # MONITORING (optional profile: docker compose --profile monitoring up -d)
+  # No application code changes required.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - appnet
+    profiles:
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`${TRAEFIK_PROMETHEUS_HOST:-prometheus.bellamybook.com}`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+      - "traefik.http.routers.prometheus.service=prometheus"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus-secure.rule=Host(`${TRAEFIK_PROMETHEUS_HOST:-prometheus.bellamybook.com}`)"
+      - "traefik.http.routers.prometheus-secure.entrypoints=websecure"
+      - "traefik.http.routers.prometheus-secure.service=prometheus"
+      - "traefik.http.routers.prometheus-secure.tls=true"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_INSTALL_PLUGINS: "grafana-clock-panel,grafana-piechart-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - appnet
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${TRAEFIK_GRAFANA_HOST:-grafana.bellamybook.com}`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.routers.grafana.service=grafana"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.grafana-secure.rule=Host(`${TRAEFIK_GRAFANA_HOST:-grafana.bellamybook.com}`)"
+      - "traefik.http.routers.grafana-secure.entrypoints=websecure"
+      - "traefik.http.routers.grafana-secure.service=grafana"
+      - "traefik.http.routers.grafana-secure.tls=true"
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.8.2
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/rootfs:ro
+    ports:
+      - "9100:9100"
+    networks:
+      - appnet
+    profiles:
+      - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8083:8080"
+    networks:
+      - appnet
+    profiles:
+      - monitoring
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-uptime-kuma
+    restart: unless-stopped
+    environment:
+      UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN: "1"
+    volumes:
+      - uptime_kuma_data:/app/data
+    ports:
+      - "3001:3001"
+    networks:
+      - appnet
+    profiles:
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.uptime-kuma.rule=Host(`${TRAEFIK_UPTIME_KUMA_HOST:-uptime.bellamybook.com}`)"
+      - "traefik.http.routers.uptime-kuma.entrypoints=web"
+      - "traefik.http.routers.uptime-kuma.service=uptime-kuma"
+      - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
+      - "traefik.http.routers.uptime-kuma-secure.rule=Host(`${TRAEFIK_UPTIME_KUMA_HOST:-uptime.bellamybook.com}`)"
+      - "traefik.http.routers.uptime-kuma-secure.entrypoints=websecure"
+      - "traefik.http.routers.uptime-kuma-secure.service=uptime-kuma"
+      - "traefik.http.routers.uptime-kuma-secure.tls=true"
+
+volumes:
+  traefik_logs:
+  traefik_letsencrypt:
+  prometheus_data:
+  grafana_data:
+  uptime_kuma_data:
+  pg_primary_data:
+  pg_replica_data:
+  redis_data:
+  mongo_data:
+  mongo_keyfile:
+  rabbitmq_data:
+  zookeeper_data:
+  zookeeper_logs:
+  kafka_data:
+  elasticsearch_data:
+  minio_data:
+  neo4j_data:
+  neo4j_logs:
+
+networks:
+  appnet:
+    driver: bridge

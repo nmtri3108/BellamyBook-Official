@@ -1,0 +1,22 @@
+# Traefik dynamic config (file provider)
+# Security headers middleware – attach to routers via labels if needed
+# Note: Traefik forwards X-Forwarded-For by default when proxying; API uses it for login IP / user location in admin
+http:
+  middlewares:
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: "SAMEORIGIN"
+    # WebSocket support for SignalR (Traefik auto-detects Upgrade: websocket header)
+    # No special config needed - Traefik handles WebSocket upgrades automatically
+    # This middleware can be attached if needed for additional headers
+    websocket-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+          X-Forwarded-Port: "443"

@@ -1,0 +1,65 @@
+# Traefik static configuration
+# Used when running with: docker compose up -d traefik
+# See dockerProd/README.md and .env (TRAEFIK_* variables).
+# Route discovery: Traefik reads labels from running containers (Docker provider).
+# If frontend/admin show 404, ensure those containers are running (see FRONTEND_ADMIN_404_TROUBLESHOOTING.md).
+
+api:
+  dashboard: true
+
+entryPoints:
+  web:
+    address: ":80"
+    # Optional: if backends need encoded chars in path (RFC 3986), set e.g. http.encodedCharacters.allowEncodedSlash: true
+    # Uncomment to redirect HTTP -> HTTPS (when using TLS)
+    # http:
+    #   redirections:
+    #     entryPoint:
+    #       to: websecure
+    #       scheme: https
+  websecure:
+    address: ":443"
+  dashboard:
+    address: ":8080"
+  metrics:
+    address: ":8082"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    # network: appnet  # Removed - Traefik will auto-detect the correct network
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Prometheus metrics (scraped by Prometheus for Grafana dashboards)
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+
+# Optional: Let's Encrypt – uncomment and set your email; ensure acme.json is mounted and chmod 600
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: your-email@example.com
+#       storage: /letsencrypt/acme.json
+#       httpChallenge:
+#         entryPoint: web
+
+log:
+  level: INFO
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+  filters:
+    statusCodes:
+      - "400-599"
+  fields:
+    defaultMode: keep
+    names:
+      ClientUsername: drop
+  format: json
