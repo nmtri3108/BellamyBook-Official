@@ -790,6 +790,7 @@ services:
       ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
       DOCS_PUBLIC_URL: ${DOCS_PUBLIC_URL:-}
       Minio__PublicUrl: ${Minio__PublicUrl:-}
+      GA4_FRONTEND_MEASUREMENT_ID: ${GA4_FRONTEND_MEASUREMENT_ID:-}
     # Use 8081 so Traefik can bind to 80; without Traefik use http://localhost:8081
     ports:
       - "8081:80"
