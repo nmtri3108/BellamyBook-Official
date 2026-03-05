@@ -1,6 +1,6 @@
 # Traefik static configuration
 # Used when running with: docker compose up -d traefik
-# See dockerProd/README.md and .env (TRAEFIK_* variables).
+# See README and .env (TRAEFIK_* variables).
 # Route discovery: Traefik reads labels from running containers (Docker provider).
 # If frontend/admin show 404, ensure those containers are running (see FRONTEND_ADMIN_404_TROUBLESHOOTING.md).
 

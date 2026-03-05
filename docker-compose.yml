@@ -51,7 +51,7 @@ services:
       - "traefik.http.routers.traefik-dashboard-secure.tls=true"
 
   # ---------------------------------------------------------------------------
-  # INFRASTRUCTURE (aligned with dockerLocalENV: primary/replica, opensearch-config, mongo keyfile)
+  # INFRASTRUCTURE (primary/replica, opensearch-config, mongo keyfile)
   # ---------------------------------------------------------------------------
   postgres-primary:
     image: postgres:15
@@ -778,7 +778,7 @@ services:
       - appnet
 
   # ---------------------------------------------------------------------------
-  # FRONTEND (build uses dockerProd/.env.frontend copied as .env in image)
+  # FRONTEND (runtime config from .env; build-time env used when building image from source)
   # ---------------------------------------------------------------------------
   frontend:
     image: ${DOCKER_REGISTRY}/bellamybook-frontend:${IMAGE_TAG}
@@ -808,7 +808,7 @@ services:
       - "traefik.http.routers.frontend-secure.tls=true"
 
   # ---------------------------------------------------------------------------
-  # ADMIN (build uses dockerProd/.env.admin copied as .env in image)
+  # ADMIN (runtime config from .env; build-time env used when building image from source)
   # ---------------------------------------------------------------------------
   admin:
     image: ${DOCKER_REGISTRY}/bellamybook-admin:${IMAGE_TAG}

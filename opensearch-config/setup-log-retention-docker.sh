@@ -1,5 +1,5 @@
 #!/bin/bash
-# Docker-friendly: wait for Elasticsearch/OpenSearch and apply N-day log retention (align with dockerLocalENV).
+# Docker-friendly: wait for Elasticsearch/OpenSearch and apply N-day log retention.
 # Used by elasticsearch-init service.
 # Set LOG_RETENTION_DAYS (default 5) to control how long logs are kept; older indices are deleted automatically.
 

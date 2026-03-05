@@ -46,19 +46,19 @@
 
 ### 1. Get this repo
 
-Clone or download this folder (the `dockerPublish` bundle). You need: `docker-compose.yml`, `.env.example`, and the config directories (`traefik/`, `primary/`, `replica/`, `scripts/`, `opensearch-config/`).
+Clone or download **this folder** (the self-host kit). You need: `docker-compose.yml`, `.env.example`, and the config directories (`traefik/`, `primary/`, `replica/`, `scripts/`, `opensearch-config/`). Create `.env` from `.env.example`; the other env files (`.env.frontend.example`, `.env.admin.example`) are for people who **build the app images from source** — you can ignore them.
 
 ### 2. Configure environment (3 env files)
 
-This kit includes **three** environment templates:
+This kit uses **three** environment files for different roles:
 
 | File | Who uses it | Purpose |
 |------|-------------|---------|
-| **`.env.example`** | **Self-hosters** (you) | Main config — copy to `.env` and set your domain, secrets, databases. Used by Docker Compose and all services. |
-| **`.env.frontend.example`** | **Publishers** (if you build images) | Frontend build-time config. Copy to `dockerProd/.env.frontend` when building the frontend image. |
-| **`.env.admin.example`** | **Publishers** (if you build images) | Admin build-time config. Copy to `dockerProd/.env.admin` when building the admin image. |
+| **`.env`** (from `.env.example`) | **Self-hosters** | Runtime config: copy `.env.example` → `.env`, then set domain, secrets, DB passwords. Used by Docker Compose and all services. **This is the only file you need** when using pre-built images. |
+| **`.env.frontend.example`** | **Image builders only** | Used when building the frontend Docker image from source. Not needed for self-hosting. |
+| **`.env.admin.example`** | **Image builders only** | Used when building the admin Docker image from source. Not needed for self-hosting. |
 
-**If you are self-hosting with pre-built images:** you only need to create **`.env`** from `.env.example`. The other two are for image publishers.
+**You only need `.env`.** Create it from `.env.example` and leave the other two files unchanged.
 
 > **Read the documentation** for clear **step-by-step** instructions: [Self-Host with Pre-Built Images](https://docs.bellamybook.com/docs/self-host/installation/docker-publish) and [Environment Configuration](https://docs.bellamybook.com/docs/self-host/configuration/environment). The docs explain every variable, the configuration checklist, and optional services (JWT, storage, SMTP, Turnstile, LiveKit, Google Login, etc.).
 
@@ -80,12 +80,12 @@ For full details and step-by-step guidance, see the [Environment](https://docs.b
 
 The stack uses a **MongoDB replica set** for the app and workers. MongoDB requires a **keyfile** for replica set authentication. You must create this file **before** your first `docker compose up`; the `mongo-keyfile-init` service copies it into a volume used by MongoDB.
 
-**Where:** In the same directory as `docker-compose.yml` (your dockerPublish folder).
+**Where:** In the same directory as `docker-compose.yml` (the folder where you have this README).
 
 **Commands (run once):**
 
 ```bash
-cd dockerPublish
+# Run from the folder that contains docker-compose.yml
 openssl rand -base64 756 > mongo-keyfile
 chmod 600 mongo-keyfile
 ```
@@ -101,8 +101,9 @@ If you skip this step, `mongo-keyfile-init` will fail with "Source keyfile /tmp/
 ```bash
 docker compose pull
 docker compose up -d
-docker compose run --rm db-migration
 ```
+
+The **db-migration** service runs automatically as part of the stack: it starts after Postgres and MongoDB are healthy, applies schema and seed, then exits. No separate migration step or EF tools required. To re-run it (e.g. after upgrading to a new image tag), use: `docker compose run --rm db-migration`.
 
 ### 5. Access
 
@@ -149,21 +150,13 @@ docker compose up -d
 
 ---
 
-## For publishers (building and pushing images)
+## For image publishers (building and pushing images)
 
-If you maintain and publish the Docker images (e.g. to Docker Hub):
+If you **build and push** the Docker images (e.g. from the full Bellamy Book source project):
 
-1. **Build and push** — See **[BUILD_AND_PUBLISH_DOCKERHUB.md](../tools/publishdocker/BUILD_AND_PUBLISH_DOCKERHUB.md)** (in `tools/publishdocker`). From the repo root:
-   ```bash
-   ./tools/publishdocker/publish-images.sh bellamy31 latest
-   ```
-   Or: `DOCKER_REGISTRY=youruser IMAGE_TAG=v1.0.0 ./tools/publishdocker/publish-images.sh`
-
-2. **Image naming** — `.env.example` uses `DOCKER_REGISTRY=bellamy31` and `IMAGE_TAG=latest` by default. All services use `image: ${DOCKER_REGISTRY}/bellamybook-<service>:${IMAGE_TAG}`.
-
-3. **Runtime config** — Frontend and admin read `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, `Minio__PublicUrl` from the user’s `.env` at container start. One image set works for any domain.
-
-4. **What to distribute** — This folder only: `docker-compose.yml`, `.env.example`, README, config dirs. No source code or CI.
+- Use the **build and publish instructions** in that project. This folder is what you **distribute** to self-hosters: `docker-compose.yml`, `.env.example`, README, and config dirs — no source code.
+- `.env.example` uses `DOCKER_REGISTRY=bellamy31` and `IMAGE_TAG=latest` by default. All services use `image: ${DOCKER_REGISTRY}/bellamybook-<service>:${IMAGE_TAG}`.
+- Frontend and admin images read `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, `Minio__PublicUrl` from the user’s `.env` at container start, so one image set works for any domain.
 
 ---
 
@@ -173,7 +166,7 @@ Images follow `${DOCKER_REGISTRY}/bellamybook-<service>:${IMAGE_TAG}`. Default r
 
 | Service | Image |
 |---------|--------|
-| db-migration | bellamybook-db-migration |
+| db-migration (database app) | bellamybook-db-migration |
 | api | bellamybook-api |
 | frontend | bellamybook-frontend |
 | admin | bellamybook-admin |
