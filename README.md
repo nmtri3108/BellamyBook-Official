@@ -78,23 +78,22 @@ For full details and step-by-step guidance, see the [Environment](https://docs.b
 
 ### 3. Create MongoDB keyfile (required)
 
-The stack uses a **MongoDB replica set** for the app and workers. MongoDB requires a **keyfile** for replica set authentication. You must create this file **before** your first `docker compose up`; the `mongo-keyfile-init` service copies it into a volume used by MongoDB.
+The stack uses a **MongoDB replica set** for the app and workers. MongoDB requires a **keyfile** for replica set authentication. This file **must be created before your first `docker compose up`**. The `docker-compose.yml` mounts this keyfile into the `mongo-keyfile-init` service, which then copies it into a volume used by the MongoDB container.
 
-**Where:** In the same directory as `docker-compose.yml` (the folder where you have this README).
+**Where:** Create `mongo-keyfile` in the **same directory as `docker-compose.yml`**.
 
 **Commands (run once):**
 
 ```bash
-# Run from the folder that contains docker-compose.yml
 openssl rand -base64 756 > mongo-keyfile
 chmod 600 mongo-keyfile
 ```
 
-- **Name:** The file must be named exactly `mongo-keyfile` (compose mounts it as `./mongo-keyfile`).
-- **Permissions:** `chmod 600` (read/write for owner only). Some setups use `chmod 400`; either is accepted by MongoDB.
-- **Do not** commit `mongo-keyfile` to version control or share it; treat it as a secret.
+- **File name:** Must be exactly `mongo-keyfile`. The compose file references `./mongo-keyfile`.
+- **Permissions:** `chmod 600` (or `chmod 400`). MongoDB accepts either; the keyfile must not be readable by others.
+- **Security:** Do **not** commit `mongo-keyfile` to git or share it; treat it as a secret.
 
-If you skip this step, `mongo-keyfile-init` will fail with "Source keyfile /tmp/keyfile not found" and MongoDB will not start.
+If you skip this step, the `mongo-keyfile-init` container will fail with **"Source keyfile /tmp/keyfile not found"** and MongoDB will not start.
 
 ### 4. Run
 
