@@ -482,6 +482,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:80
+      # Required for CORS, JWT, emails (verify-email, forgot-pass), download links, backup/admin URLs. Set in .env.
+      # For robots.txt/sitemap the API can fall back to the request Host when these are wrong, but the rest of the app needs them.
+      AppSettings__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__ApiBaseUrl: ${API_PUBLIC_URL:-}/api
       # Ensure MongoDB uses directConnection=true (required for single-node replica set; avoids "not primary" errors)
       MongoDb__ConnectionString: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
       MongoDb__Database: ${MongoDb__Database:-App}

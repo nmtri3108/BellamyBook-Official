@@ -71,7 +71,7 @@ cp .env.example .env
 Edit `.env` and set at least:
 
 - **Docker images:** `DOCKER_REGISTRY=bellamy31`, `IMAGE_TAG=latest` (defaults; change if you use another publisher or tag).
-- **Your domain:** `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, and all `TRAEFIK_*_HOST` to your hostnames.
+- **Your domain:** `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, and all `TRAEFIK_*_HOST` to your hostnames. Use your real public URLs (not localhost) so robots.txt and sitemap point to your site for search engines.
 - **Secrets:** Replace every `CHANGE_ME_*` — Postgres, Redis, MongoDB, Neo4j, RabbitMQ, MinIO, and **JWT** (`JwtSettings__Secret`, e.g. `openssl rand -base64 64`).
 
 For full details and step-by-step guidance, see the [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) and [configuration checklist](https://docs.bellamybook.com/docs/self-host/configuration/environment#configuration-checklist) in the docs.
@@ -109,6 +109,7 @@ The **db-migration** service runs automatically as part of the stack: it starts 
 
 - **With Traefik:** Use the hostnames in your `.env` (e.g. `https://app.yourdomain.com`). Point DNS to this server.
 - **Without Traefik:** Frontend → http://localhost:8081, Admin → http://localhost:8084, API → http://localhost:5000.
+- **Cloudflare Tunnel:** In tunnel `config.yml`, set `originRequest.httpHostHeader` to the same host as each ingress (e.g. `app.your-domain.com`) so the API gets the correct Host for robots.txt/sitemap.
 
 Full step-by-step and optional services (R2, SMTP, Turnstile, Google Login, LiveKit, MinIO policies): **[Self-Host with Pre-Built Images](https://docs.bellamybook.com/docs/self-host/installation/docker-publish)**.
 
