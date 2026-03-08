@@ -293,7 +293,7 @@ services:
     restart: "no"
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |

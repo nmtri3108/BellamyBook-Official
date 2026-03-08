@@ -136,6 +136,7 @@ For **step-by-step** setup of the three env files and all options, read the docu
 | CAPTCHA on login/register | [Turnstile](https://docs.bellamybook.com/docs/self-host/configuration/turnstile) |
 | Sign in with Google | [Google OAuth](https://docs.bellamybook.com/docs/self-host/configuration/google-oauth) |
 | Voice and video calls | [LiveKit](https://docs.bellamybook.com/docs/self-host/configuration/livekit) |
+| Kafka (workers, "topic does not exist", Connection refused) | See **dockerProd/KAFKA_TROUBLESHOOTING.md** (bootstrap `kafka:29092`, topic creation via kafka-init) |
 
 ---
 
