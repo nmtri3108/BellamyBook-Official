@@ -1,0 +1,11 @@
+# Local testing override (e.g. on your Mac) – no Traefik, no port 80/443.
+# Use: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+# Then open: Frontend http://localhost:8081, Admin http://localhost:8084, API http://localhost:5000
+# See LOCAL_TESTING.md for full steps.
+
+version: '3.9'
+
+services:
+  traefik:
+    profiles:
+      - with-traefik
