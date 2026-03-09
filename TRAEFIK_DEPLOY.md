@@ -2,6 +2,8 @@
 
 When you deploy to a **Linux server** (not local testing), Traefik is the reverse proxy that routes traffic to the app. Follow this checklist so it works.
 
+**Config verified for VPS:** `traefik/traefik.yml` and `traefik/dynamic/traefik-dynamic.yml` are set up for production: entrypoints 80/443/8080/8082, Docker provider (reads labels from api/frontend/admin/websocket-worker/chat-worker), file provider for middlewares. API has priority 1; `/hubs/notification`, `/hubs/onlineusers` → websocket-worker; `/hubs/chat`, `/hubs/chat-online` → chat-worker (priority 100). WebSocket upgrade is handled by Traefik automatically. On the server, run **without** `docker-compose.local.yml` so Traefik starts.
+
 ---
 
 ## 1. Use the right compose command (no local override)

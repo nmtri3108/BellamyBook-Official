@@ -2,8 +2,6 @@
 # Set DOCKER_REGISTRY and IMAGE_TAG in .env (default: bellamy31, latest).
 # Copy .env.example to .env and configure. See README.md.
 
-version: '3.9'
-
 services:
   # ---------------------------------------------------------------------------
   # TRAEFIK (reverse proxy) – optional; start with: docker compose up -d traefik
@@ -51,7 +49,7 @@ services:
       - "traefik.http.routers.traefik-dashboard-secure.tls=true"
 
   # ---------------------------------------------------------------------------
-  # INFRASTRUCTURE (primary/replica, opensearch-config, mongo keyfile)
+  # INFRASTRUCTURE (aligned with dockerProd: primary/replica, same healthcheck and replica flow)
   # ---------------------------------------------------------------------------
   postgres-primary:
     image: postgres:15
@@ -75,7 +73,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 60s
 
   postgres-replica:
     image: postgres:15
@@ -91,22 +89,20 @@ services:
         condition: service_healthy
     ports:
       - "5433:5432"
-    command:
-      - bash
-      - -c
-      - |
+    command: >
+      bash -c "
         set -e
-        export PGPASSWORD="$$REPLICATION_PASSWORD"
+        export PGPASSWORD=\"$${REPLICATION_PASSWORD}\"
         echo 'Waiting for primary to accept connections...'
         until pg_isready -h postgres-primary -p 5432; do sleep 2; done
         echo 'Waiting for replication user myuser (primary init may still be running)...'
-        for i in $$(seq 1 60); do
+        for i in \$(seq 1 60); do
           rm -rf /var/lib/postgresql/data/*
           if gosu postgres pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U myuser -Fp -Xs -P -R; then
             echo 'pg_basebackup succeeded.'
             break
           fi
-          echo "Attempt $$i/60: basebackup failed, retrying in 5s..."
+          echo \"Attempt $$i/60: basebackup failed, retrying in 5s...\"
           sleep 5
         done
         if [ ! -f /var/lib/postgresql/data/postgresql.conf ]; then
@@ -114,10 +110,11 @@ services:
           exit 1
         fi
         cp /tmp/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf
-        echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf
+        echo \"listen_addresses='*'\" >> /var/lib/postgresql/data/postgresql.conf
         chown -R postgres:postgres /var/lib/postgresql/data
         chmod 700 /var/lib/postgresql/data
         exec gosu postgres postgres
+      "
     volumes:
       - ./replica/pg_hba.conf:/tmp/pg_hba.conf:ro
       - pg_replica_data:/var/lib/postgresql/data
@@ -496,6 +493,10 @@ services:
       AppSettings__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
       Frontend__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
       Frontend__ApiBaseUrl: ${API_PUBLIC_URL:-}/api
+      Frontend__CorsOrigins__0: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__CorsOrigins__1: ${ADMIN_PUBLIC_URL:-}
+      Frontend__CorsOrigins__2: ${API_PUBLIC_URL:-}
+      Frontend__CorsOrigins__3: ${DOCS_PUBLIC_URL:-}
       # Ensure MongoDB uses directConnection=true (required for single-node replica set; avoids "not primary" errors)
       MongoDb__ConnectionString: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true
       MongoDb__Database: ${MongoDb__Database:-App}
@@ -506,6 +507,9 @@ services:
       KafkaTopics__ContentUpdatedTopic: ${KafkaTopics__ContentUpdatedTopic:-content_updated}
       KafkaTopics__ContentDeletedTopic: ${KafkaTopics__ContentDeletedTopic:-content_deleted}
       KafkaTopics__HashtagEventsTopic: ${KafkaTopics__HashtagEventsTopic:-hashtag_events}
+      # Neo4j (graph features; set Neo4j__Password in .env to match password in NEO4J_AUTH)
+      Neo4j__ConnectionString: bolt://neo4j:7687
+      Neo4j__Username: neo4j
     depends_on:
       postgres-primary: { condition: service_healthy }
       redis: { condition: service_started }
@@ -517,8 +521,8 @@ services:
       elasticsearch: { condition: service_healthy }
       minio: { condition: service_started }
       neo4j: { condition: service_healthy }
-    ports:
-      - "5000:80"
+    # For local: use docker-compose.local.yml (api-gateway exposes API_PORT). For prod: Traefik routes to api by name.
+    # To expose API directly (no Traefik, no local gateway), add in override: ports: - "${API_PORT:-5000}:80"
     networks:
       - appnet
     labels:
@@ -553,6 +557,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:80
+      Frontend__CorsOrigins__0: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__CorsOrigins__1: ${ADMIN_PUBLIC_URL:-}
+      Frontend__CorsOrigins__2: ${API_PUBLIC_URL:-}
+      Frontend__CorsOrigins__3: ${DOCS_PUBLIC_URL:-}
     depends_on:
       api: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -584,6 +592,10 @@ services:
       ASPNETCORE_URLS: http://+:80
       SignalR__ApiBaseUrl: http://api:80
       SignalR__ChatHubUrl: http://api:80/hubs/chat
+      Frontend__CorsOrigins__0: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__CorsOrigins__1: ${ADMIN_PUBLIC_URL:-}
+      Frontend__CorsOrigins__2: ${API_PUBLIC_URL:-}
+      Frontend__CorsOrigins__3: ${DOCS_PUBLIC_URL:-}
     depends_on:
       api: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -684,6 +696,8 @@ services:
       Kafka__GroupId: graph-worker-group
       Kafka__ClientId: graph-worker
       KafkaTopics__UserInteractedTopic: ${KafkaTopics__UserInteractedTopic:-user_interacted}
+      Neo4j__ConnectionString: bolt://neo4j:7687
+      Neo4j__Username: neo4j
     depends_on:
       neo4j: { condition: service_healthy }
       kafka: { condition: service_started }
@@ -798,6 +812,8 @@ services:
     image: ${DOCKER_REGISTRY}/bellamybook-frontend:${IMAGE_TAG}
     container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-frontend
     restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
     environment:
       API_PUBLIC_URL: ${API_PUBLIC_URL:-}
       FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-}

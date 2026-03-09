@@ -1,11 +1,37 @@
 # Local testing override (e.g. on your Mac) – no Traefik, no port 80/443.
 # Use: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
-# Then open: Frontend http://localhost:8081, Admin http://localhost:8084, API http://localhost:5000
-# See LOCAL_TESTING.md for full steps.
-
-version: '3.9'
+# If port 5000 is in use, set API_PORT=5001 in .env and API_PUBLIC_URL=http://localhost:5001
+# Then open: Frontend http://localhost:8081, Admin http://localhost:8084, API + WebSocket http://localhost:${API_PORT:-5000}
+# MinIO: http://localhost:9000 (set Minio__PublicUrl=http://localhost:9000 in .env so frontend can load media)
 
 services:
   traefik:
     profiles:
       - with-traefik
+
+  # Single entry point for API + SignalR (notification, onlineusers, chat) so WebSocket works without Traefik
+  api-gateway:
+    image: nginx:alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-api-gateway
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-5000}:80"
+    volumes:
+      - ./local/nginx-api-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api: { condition: service_healthy }
+      websocket-worker: { condition: service_started }
+      chat-worker: { condition: service_started }
+    networks:
+      - appnet
+
+  # API: no host port (api-gateway binds API_PORT). Use Local env so cookie Secure=false + RefreshToken in body (admin login stays).
+  # Disable Turnstile for login locally so admin can sign in without CAPTCHA (optional: remove these 4 lines to require Turnstile).
+  api:
+    ports: []
+    environment:
+      ASPNETCORE_ENVIRONMENT: Local
+      Turnstile__EnabledEndpoints__0: register
+      Turnstile__EnabledEndpoints__1: forgot-password
+      Turnstile__EnabledEndpoints__2: reset-password
+      Turnstile__EnabledEndpoints__3: contact

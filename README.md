@@ -108,6 +108,8 @@ The **db-migration** service runs automatically as part of the stack: it starts 
 
 - **With Traefik:** Use the hostnames in your `.env` (e.g. `https://app.yourdomain.com`). Point DNS to this server.
 - **Without Traefik:** Frontend → http://localhost:8081, Admin → http://localhost:8084, API → http://localhost:5000.
+
+**Default admin account** (if seeded by db-migration): **Email** `Admin@gmail.com`, **Password** `Admin123@`. **Change this password immediately** after first login (Admin Panel → Profile or account settings).
 - **Cloudflare Tunnel:** In tunnel `config.yml`, set `originRequest.httpHostHeader` to the same host as each ingress (e.g. `app.your-domain.com`) so the API gets the correct Host for robots.txt/sitemap.
 
 **To make sure Traefik works when you deploy** (hostnames, DNS, ports, HTTPS): see **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)**.
@@ -118,7 +120,7 @@ Full step-by-step and optional services (R2, SMTP, Turnstile, Google Login, Live
 
 ## Test on your Mac first (no server needed)
 
-You can run the **same** self-host stack locally before deploying anywhere. No domain or server required. See **[LOCAL_TESTING.md](LOCAL_TESTING.md)** for step-by-step instructions (create `.env` with localhost URLs, create `mongo-keyfile`, then run with `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`). Frontend → http://localhost:8081, Admin → http://localhost:8084, API → http://localhost:5000.
+You can run the **same** self-host stack locally before deploying anywhere. No domain or server required. See **[LOCAL_TESTING.md](LOCAL_TESTING.md)** for step-by-step instructions (create `.env` with localhost URLs and `Minio__PublicUrl=http://localhost:9000`, create `mongo-keyfile`, then run with `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`). Frontend → http://localhost:8081, Admin → http://localhost:8084, API + WebSocket → http://localhost:5000, MinIO → http://localhost:9000.
 
 ---
 
