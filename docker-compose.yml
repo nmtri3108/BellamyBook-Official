@@ -254,14 +254,21 @@ services:
       - zookeeper_logs:/var/lib/zookeeper/log
     networks:
       - appnet
-    # No healthcheck: Confluent image has no curl/nc in PATH; ZK starts in ~1s (see logs). Kafka has long start_period instead.
+    healthcheck:
+      # Port open only (reliable on redeploy; ruok/imok check can fail on some images)
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/2181' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-kafka
     restart: unless-stopped
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
       - "9101:9101"
@@ -281,11 +288,12 @@ services:
     networks:
       - appnet
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 || exit 1"]
-      interval: 15s
-      timeout: 25s
-      retries: 30
-      start_period: 180s
+      # Retry inside the check so transient failures don't mark unhealthy; start_period gives Kafka time on slow prod servers
+      test: ["CMD-SHELL", "for i in 1 2 3 4 5; do kafka-broker-api-versions --bootstrap-server localhost:29092 2>/dev/null && exit 0; sleep 10; done; exit 1"]
+      interval: 20s
+      timeout: 60s
+      retries: 20
+      start_period: 300s
 
   kafka-init:
     image: confluentinc/cp-kafka:7.4.0
@@ -293,7 +301,7 @@ services:
     restart: "no"
     depends_on:
       kafka:
-        condition: service_healthy
+        condition: service_started
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
