@@ -1,6 +1,7 @@
 # Traefik dynamic config (file provider)
 # Security headers middleware – attach to routers via labels if needed
 # Note: Traefik forwards X-Forwarded-For by default when proxying; API uses it for login IP / user location in admin
+# SEO: redirect www to canonical domain (301). Replace your-domain.com with your actual domain in regex/replacement and in routers.
 http:
   middlewares:
     security-headers:
@@ -20,3 +21,23 @@ http:
         customRequestHeaders:
           X-Forwarded-Proto: "https"
           X-Forwarded-Port: "443"
+    # Redirect www to canonical (one domain for SEO). Replace your-domain.com with your domain.
+    redirect-www-to-canonical:
+      redirectRegex:
+        regex: "^https?://www\\.your-domain\\.com/(.*)"
+        replacement: "https://your-domain.com/${1}"
+        permanent: true
+  routers:
+    # www -> canonical redirect (HTTP). Replace www.your-domain.com with your www host.
+    frontend-www-redirect:
+      rule: "Host(`www.your-domain.com`)"
+      entryPoints: ["web"]
+      middlewares: ["redirect-www-to-canonical"]
+      service: "frontend@docker"
+    # www -> canonical redirect (HTTPS)
+    frontend-www-redirect-secure:
+      rule: "Host(`www.your-domain.com`)"
+      entryPoints: ["websecure"]
+      middlewares: ["redirect-www-to-canonical"]
+      service: "frontend@docker"
+      tls: true
