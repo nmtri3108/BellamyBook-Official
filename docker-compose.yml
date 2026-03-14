@@ -806,7 +806,7 @@ services:
       - appnet
 
   # ---------------------------------------------------------------------------
-  # FRONTEND (runtime config from .env; build-time env used when building image from source)
+  # FRONTEND (runtime config from .env – set below; no rebuild needed for URLs/keys)
   # ---------------------------------------------------------------------------
   frontend:
     image: ${DOCKER_REGISTRY}/bellamybook-frontend:${IMAGE_TAG}
@@ -821,6 +821,14 @@ services:
       DOCS_PUBLIC_URL: ${DOCS_PUBLIC_URL:-}
       Minio__PublicUrl: ${Minio__PublicUrl:-}
       GA4_FRONTEND_MEASUREMENT_ID: ${GA4_FRONTEND_MEASUREMENT_ID:-}
+      # Optional: set in .env to override at runtime (Turnstile, Google, LiveKit, Web Push)
+      VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+      VITE_TURNSTILE_THEME: ${VITE_TURNSTILE_THEME:-}
+      VITE_TURNSTILE_SIZE: ${VITE_TURNSTILE_SIZE:-}
+      VITE_TURNSTILE_ENABLED_ENDPOINTS: ${VITE_TURNSTILE_ENABLED_ENDPOINTS:-}
+      VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+      VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-}
+      VITE_VAPID_PUBLIC_KEY: ${VITE_VAPID_PUBLIC_KEY:-}
     # Use 8081 so Traefik can bind to 80; without Traefik use http://localhost:8081
     ports:
       - "8081:80"
@@ -838,7 +846,7 @@ services:
       - "traefik.http.routers.frontend-secure.tls=true"
 
   # ---------------------------------------------------------------------------
-  # ADMIN (runtime config from .env; build-time env used when building image from source)
+  # ADMIN (runtime config from .env – set below; no rebuild needed for URLs/keys)
   # ---------------------------------------------------------------------------
   admin:
     image: ${DOCKER_REGISTRY}/bellamybook-admin:${IMAGE_TAG}
@@ -849,6 +857,11 @@ services:
       FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-}
       ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
       Minio__PublicUrl: ${Minio__PublicUrl:-}
+      # Optional: set in .env to override at runtime (Turnstile)
+      VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+      VITE_TURNSTILE_THEME: ${VITE_TURNSTILE_THEME:-}
+      VITE_TURNSTILE_SIZE: ${VITE_TURNSTILE_SIZE:-}
+      VITE_TURNSTILE_ENABLED_ENDPOINTS: ${VITE_TURNSTILE_ENABLED_ENDPOINTS:-}
     # Use 8084 so Traefik can use 8080 for dashboard; without Traefik use http://localhost:8084
     ports:
       - "8084:80"

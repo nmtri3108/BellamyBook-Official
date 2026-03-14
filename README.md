@@ -38,7 +38,7 @@
 - **Your data, your server** — Full control over users and content.
 - **Your domain** — Run at `app.yourdomain.com` with your branding.
 - **Optional integrations** — MinIO or Cloudflare R2 for storage; SMTP, Turnstile, LiveKit, Google Login as you need.
-- **One compose, one `.env`** — No build step; pull images, configure, run.
+- **One compose, one `.env`** — No build step; pull images, configure, run. **Runtime config** — Set Turnstile, Google OAuth, LiveKit, and Web Push keys in `.env`; they apply when frontend and admin start (no image rebuild).
 
 ---
 
@@ -75,6 +75,8 @@ Edit `.env` and set at least:
 - **Secrets:** Replace every `CHANGE_ME_*` — Postgres, Redis, MongoDB, Neo4j, RabbitMQ, MinIO, and **JWT** (`JwtSettings__Secret`, e.g. `openssl rand -base64 64`).
 
 For full details and step-by-step guidance, see the [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) and [configuration checklist](https://docs.bellamybook.com/docs/self-host/configuration/environment#configuration-checklist) in the docs.
+
+**Runtime config (optional).** In the same `.env` you can set Turnstile, Google OAuth, LiveKit, and Web Push so they apply when frontend and admin start — no image rebuild. See the **"FRONTEND & ADMIN RUNTIME"** section in `.env.example` (`VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_LIVEKIT_URL`, `VITE_VAPID_PUBLIC_KEY`, and optional Turnstile theme/size/endpoints). After editing, run `docker compose up -d frontend admin` to apply.
 
 ### 3. Create MongoDB keyfile (required)
 
@@ -165,9 +167,9 @@ docker compose up -d
 
 If you **build and push** the Docker images (e.g. from the full Bellamy Book source project):
 
-- Use the **build and publish instructions** in that project. This folder is what you **distribute** to self-hosters: `docker-compose.yml`, `.env.example`, README, and config dirs — no source code.
+- Use the **build and publish instructions** in that project (e.g. `tools/publishdocker/publish-images.sh`). This folder is what you **distribute** to self-hosters: `docker-compose.yml`, `.env.example`, README, and config dirs — no source code.
 - `.env.example` uses `DOCKER_REGISTRY=bellamy31` and `IMAGE_TAG=latest` by default. All services use `image: ${DOCKER_REGISTRY}/bellamybook-<service>:${IMAGE_TAG}`.
-- Frontend and admin images read `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, `Minio__PublicUrl` from the user’s `.env` at container start, so one image set works for any domain.
+- Frontend and admin read **URLs and optional keys** (Turnstile, Google, LiveKit, VAPID) from the user's `.env` at container start, so one image set works for any domain. To verify: set e.g. `VITE_TURNSTILE_SITE_KEY` in `.env`, run `docker compose up -d frontend admin`, then check `/config.js` in the browser.
 
 ---
 
