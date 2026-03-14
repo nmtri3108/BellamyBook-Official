@@ -89,34 +89,10 @@ services:
         condition: service_healthy
     ports:
       - "5433:5432"
-    command: >
-      bash -c "
-        set -e
-        export PGPASSWORD=\"$${REPLICATION_PASSWORD}\"
-        echo 'Waiting for primary to accept connections...'
-        until pg_isready -h postgres-primary -p 5432; do sleep 2; done
-        echo 'Waiting for replication user myuser (primary init may still be running)...'
-        for i in \$(seq 1 60); do
-          rm -rf /var/lib/postgresql/data/*
-          if gosu postgres pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U myuser -Fp -Xs -P -R; then
-            echo 'pg_basebackup succeeded.'
-            break
-          fi
-          echo \"Attempt $$i/60: basebackup failed, retrying in 5s...\"
-          sleep 5
-        done
-        if [ ! -f /var/lib/postgresql/data/postgresql.conf ]; then
-          echo 'ERROR: pg_basebackup did not succeed after 60 attempts (check REPLICATION_PASSWORD and primary init)'
-          exit 1
-        fi
-        cp /tmp/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf
-        echo \"listen_addresses='*'\" >> /var/lib/postgresql/data/postgresql.conf
-        chown -R postgres:postgres /var/lib/postgresql/data
-        chmod 700 /var/lib/postgresql/data
-        exec gosu postgres postgres
-      "
+    entrypoint: ["/bin/bash", "/scripts/postgres-replica-init.sh"]
     volumes:
       - ./replica/pg_hba.conf:/tmp/pg_hba.conf:ro
+      - ./scripts/postgres-replica-init.sh:/scripts/postgres-replica-init.sh:ro
       - pg_replica_data:/var/lib/postgresql/data
     networks:
       - appnet
@@ -338,11 +314,11 @@ services:
     networks:
       - appnet
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f -s http://localhost:9200/_cluster/health || exit 1"]
       interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
 
   elasticsearch-init:
     image: curlimages/curl:latest
@@ -412,6 +388,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    labels:
+      # MinIO behind Traefik (CDN / object storage for media). Set TRAEFIK_MINIO_HOST in .env and Minio__PublicUrl to https://${TRAEFIK_MINIO_HOST}.
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio.rule=Host(`${TRAEFIK_MINIO_HOST:-minio.bellamybook.com}`)"
+      - "traefik.http.routers.minio.entrypoints=web"
+      - "traefik.http.routers.minio.service=minio"
+      - "traefik.http.services.minio.loadbalancer.server.port=9000"
+      - "traefik.http.routers.minio-secure.rule=Host(`${TRAEFIK_MINIO_HOST:-minio.bellamybook.com}`)"
+      - "traefik.http.routers.minio-secure.entrypoints=websecure"
+      - "traefik.http.routers.minio-secure.service=minio"
+      - "traefik.http.routers.minio-secure.tls=true"
 
   minio-init:
     image: minio/mc
@@ -447,13 +434,12 @@ services:
     networks:
       - appnet
     healthcheck:
-      # Use cypher-shell to check Neo4j (built-in tool, no external dependencies)
-      # Extract password from NEO4J_AUTH env var (format: neo4j/password)
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' > /dev/null 2>&1 || exit 1"]
-      interval: 30s
+      # Use wget (Neo4j image has wget; avoids shell variable syntax differences on Linux vs Mac)
+      test: ["CMD-SHELL", "wget -q --spider --tries=1 http://localhost:7474 || exit 1"]
+      interval: 15s
       timeout: 10s
-      retries: 5
-      start_period: 40s
+      retries: 10
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
   # DATABASE MIGRATION (run once before first start; see README.md)

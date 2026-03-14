@@ -37,7 +37,7 @@
 
 - **Your data, your server** — Full control over users and content.
 - **Your domain** — Run at `app.yourdomain.com` with your branding.
-- **Optional integrations** — MinIO or Cloudflare R2 for storage; SMTP, Turnstile, LiveKit, Google Login as you need.
+- **Storage** — MinIO is the default for self-host (avatars, posts, media); configure MinIO credentials and `Minio__PublicUrl` in `.env`. Alternatively use Cloudflare R2. Optional: SMTP, Turnstile, LiveKit, Google Login.
 - **One compose, one `.env`** — No build step; pull images, configure, run. **Runtime config** — Set Turnstile, Google OAuth, LiveKit, and Web Push keys in `.env`; they apply when frontend and admin start (no image rebuild).
 
 ---
@@ -72,7 +72,8 @@ Edit `.env` and set at least:
 
 - **Docker images:** `DOCKER_REGISTRY=bellamy31`, `IMAGE_TAG=latest` (defaults; change if you use another publisher or tag).
 - **Your domain:** `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, and all `TRAEFIK_*_HOST` to your hostnames. Use your real public URLs (not localhost) so robots.txt and sitemap point to your site for search engines.
-- **Secrets:** Replace every `CHANGE_ME_*` — Postgres, Redis, MongoDB, Neo4j, RabbitMQ, MinIO, and **JWT** (`JwtSettings__Secret`, e.g. `openssl rand -base64 64`).
+- **Secrets:** Replace every `CHANGE_ME_*` — Postgres, Redis, MongoDB, Neo4j, RabbitMQ, **MinIO** (`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`), and **JWT** (`JwtSettings__Secret`, e.g. `openssl rand -base64 64`).
+- **MinIO (required for self-host when using default storage):** The stack uses MinIO by default for avatars, posts, and media. You must set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`, and set `Minio__PublicUrl` so the frontend can load media — e.g. `Minio__PublicUrl=http://localhost:9000` for local testing, or `Minio__PublicUrl=https://${TRAEFIK_MINIO_HOST}` when using Traefik. See `.env.example` and [Storage](https://docs.bellamybook.com/docs/self-host/configuration/storage) in the docs.
 
 For full details and step-by-step guidance, see the [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) and [configuration checklist](https://docs.bellamybook.com/docs/self-host/configuration/environment#configuration-checklist) in the docs.
 
@@ -114,7 +115,7 @@ The **db-migration** service runs automatically as part of the stack: it starts 
 **Default admin account** (if seeded by db-migration): **Email** `Admin@gmail.com`, **Password** `Admin123@`. **Change this password immediately** after first login (Admin Panel → Profile or account settings).
 - **Cloudflare Tunnel:** In tunnel `config.yml`, set `originRequest.httpHostHeader` to the same host as each ingress (e.g. `app.your-domain.com`) so the API gets the correct Host for robots.txt/sitemap.
 
-**To make sure Traefik works when you deploy** (hostnames, DNS, ports, HTTPS): see **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)**.
+**To make sure Traefik works when you deploy** (hostnames, DNS, ports, HTTPS): see **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)**. **Linux deploy:** Postgres replica uses `scripts/postgres-replica-init.sh` (avoids variable/shell differences vs Mac). Neo4j and Elasticsearch have longer healthcheck start periods and retries for stable startup.
 
 Full step-by-step and optional services (R2, SMTP, Turnstile, Google Login, LiveKit, MinIO policies): **[Self-Host with Pre-Built Images](https://docs.bellamybook.com/docs/self-host/installation/docker-publish)**.
 
@@ -142,7 +143,7 @@ For **step-by-step** setup of the three env files and all options, read the docu
 |------|------|
 | Environment variables, JWT, databases, storage | [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) |
 | JWT secret (required for login) | [JWT](https://docs.bellamybook.com/docs/self-host/configuration/jwt) |
-| MinIO (default) or Cloudflare R2 | [Storage](https://docs.bellamybook.com/docs/self-host/configuration/storage), [R2 Setup](https://docs.bellamybook.com/docs/self-host/configuration/r2-setup) |
+| **MinIO (default storage for self-host)** — set `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and `Minio__PublicUrl` in `.env`. Or use R2. | [Storage](https://docs.bellamybook.com/docs/self-host/configuration/storage), [R2 Setup](https://docs.bellamybook.com/docs/self-host/configuration/r2-setup) |
 | MinIO bucket policies (security) | [Storage — MinIO security](https://docs.bellamybook.com/docs/self-host/configuration/storage#bucket-policies-security) |
 | Mail (password reset, notifications) | [SMTP](https://docs.bellamybook.com/docs/self-host/configuration/smtp) |
 | CAPTCHA on login/register | [Turnstile](https://docs.bellamybook.com/docs/self-host/configuration/turnstile) |

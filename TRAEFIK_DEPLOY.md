@@ -38,6 +38,7 @@ This warns if `TRAEFIK_API_HOST`, `TRAEFIK_FRONTEND_HOST`, or `TRAEFIK_ADMIN_HOS
 | `TRAEFIK_ADMIN_HOST` | `admin.yourdomain.com` | DNS for admin panel |
 | `TRAEFIK_DASHBOARD_HOST` | `dashboard.yourdomain.com` (optional) | If you expose Traefik dashboard |
 | `TRAEFIK_DASHBOARD_IP` | Your server’s public IP | So `http://YOUR_IP:8080` works for dashboard without a hostname |
+| `TRAEFIK_MINIO_HOST` | `minio.yourdomain.com` (optional) | MinIO object storage / CDN for media; set `Minio__PublicUrl=https://${TRAEFIK_MINIO_HOST}` |
 
 Also set the **public URLs** (they should match the same hostnames):
 
@@ -45,6 +46,8 @@ Also set the **public URLs** (they should match the same hostnames):
 API_PUBLIC_URL=https://api.yourdomain.com
 FRONTEND_PUBLIC_URL=https://app.yourdomain.com
 ADMIN_PUBLIC_URL=https://admin.yourdomain.com
+# If using MinIO behind Traefik for media (CDN):
+Minio__PublicUrl=https://${TRAEFIK_MINIO_HOST}
 ```
 
 If you leave `TRAEFIK_*_HOST` as `api.your-domain.com` or `bellamybook.com`, Traefik will only respond to those hostnames, so your domain will get 404 or wrong routing.
