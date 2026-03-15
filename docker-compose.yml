@@ -759,6 +759,7 @@ services:
       ASPNETCORE_URLS: http://+:80
     depends_on:
       rabbitmq: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
     networks:
       - appnet
 
