@@ -54,7 +54,20 @@ If you leave `TRAEFIK_*_HOST` as `api.your-domain.com` or `bellamybook.com`, Tra
 
 ---
 
-## 3. Point DNS to the server
+## 3. Edit `traefik/dynamic/traefik-dynamic.yml`
+
+Traefik loads **`traefik/dynamic/traefik-dynamic.yml`** for middlewares and optional **www → canonical** redirects. The file ships with placeholders (`your-domain.com`, `www.your-domain.com`).
+
+- **If you use `www`:** Replace every placeholder with your real domain. Set `TRAEFIK_FRONTEND_WWW_HOST` in `.env`, add `www` to CORS and Turnstile (see `.env.example`), and point DNS for `www` here. Align the redirect target with `FRONTEND_PUBLIC_URL`.
+- **If you do not use `www`:** Remove or comment out the `redirect-www-to-canonical` middleware and the `frontend-www-redirect` / `frontend-www-redirect-secure` routers so you do not leave fake hostnames in Traefik.
+
+After changes: `docker compose up -d traefik` (or restart the Traefik container) so the file provider reloads.
+
+The hosted docs mirror this: [Make sure Traefik works when you deploy](https://docs.bellamybook.com/docs/self-host/installation/traefik-when-you-deploy).
+
+---
+
+## 4. Point DNS to the server
 
 For each hostname you use:
 
@@ -69,7 +82,7 @@ dig +short api.yourdomain.com
 
 ---
 
-## 4. Open ports on the server
+## 5. Open ports on the server
 
 Traefik needs:
 
@@ -87,7 +100,7 @@ On the server:
 
 ---
 
-## 5. HTTPS (recommended for production)
+## 6. HTTPS (recommended for production)
 
 By default, Traefik is configured with HTTP (80) and HTTPS (443) entrypoints, but **no TLS certificate provider** is enabled. So 443 will accept connections but won’t serve a valid cert until you configure one.
 
@@ -108,7 +121,7 @@ By default, Traefik is configured with HTTP (80) and HTTPS (443) entrypoints, bu
 
 ---
 
-## 6. Quick check that Traefik is working
+## 7. Quick check that Traefik is working
 
 1. **Containers:**  
    `docker compose ps`  
@@ -137,8 +150,9 @@ By default, Traefik is configured with HTTP (80) and HTTPS (443) entrypoints, bu
 |------|--------|
 | 1 | On server use `docker compose up -d` (no `-f docker-compose.local.yml`) |
 | 2 | Set all `TRAEFIK_*_HOST` and `*_PUBLIC_URL` in `.env` to **your** domain hostnames |
-| 3 | Point DNS (A/AAAA) for those hostnames to this server |
-| 4 | Open ports 80 and 443 (and 8080 if using dashboard) |
-| 5 | Configure HTTPS (Let’s Encrypt, Cloudflare, or another proxy) |
+| 3 | Edit **`traefik/dynamic/traefik-dynamic.yml`** (www placeholders or remove www routers); restart Traefik |
+| 4 | Point DNS (A/AAAA) for those hostnames to this server |
+| 5 | Open ports 80 and 443 (and 8080 if using dashboard) |
+| 6 | Configure HTTPS (Let’s Encrypt, Cloudflare, or another proxy) |
 
 If you do these, Traefik will route traffic correctly when users deploy to their own server.

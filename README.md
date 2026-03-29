@@ -48,6 +48,8 @@
 
 Clone or download **this folder** (the self-host kit). You need: `docker-compose.yml`, `.env.example`, and the config directories (`traefik/`, `primary/`, `replica/`, `scripts/`, `opensearch-config/`). Create `.env` from `.env.example`; the other env files (`.env.frontend.example`, `.env.admin.example`) are for people who **build the app images from source** — you can ignore them.
 
+**Traefik (production):** Before you rely on Traefik on a server, edit **`traefik/dynamic/traefik-dynamic.yml`**. It ships with placeholder hostnames (`your-domain.com`, `www.your-domain.com`) for optional **www → canonical** SEO redirects and security middleware. Replace those with your real domain, or remove or comment out the `redirect-www-to-canonical` middleware and the `frontend-www-redirect` routers if you do not use `www`. If you skip this, `www` traffic may redirect to the wrong host. Details: **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)** and [Make sure Traefik works when you deploy](https://docs.bellamybook.com/docs/self-host/installation/traefik-when-you-deploy).
+
 ### 2. Configure environment (3 env files)
 
 This kit uses **three** environment files for different roles:
@@ -115,7 +117,7 @@ The **db-migration** service runs automatically as part of the stack: it starts 
 **Default admin account** (if seeded by db-migration): **Email** `Admin@gmail.com`, **Password** `Admin123@`. **Change this password immediately** after first login (Admin Panel → Profile or account settings).
 - **Cloudflare Tunnel:** In tunnel `config.yml`, set `originRequest.httpHostHeader` to the same host as each ingress (e.g. `app.your-domain.com`) so the API gets the correct Host for robots.txt/sitemap.
 
-**To make sure Traefik works when you deploy** (hostnames, DNS, ports, HTTPS): see **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)**. **Linux deploy:** Postgres replica uses `scripts/postgres-replica-init.sh` (avoids variable/shell differences vs Mac). Neo4j and Elasticsearch have longer healthcheck start periods and retries for stable startup.
+**To make sure Traefik works when you deploy** (hostnames, DNS, **`traefik/dynamic/traefik-dynamic.yml`**, ports, HTTPS): see **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)**. **Linux deploy:** Postgres replica uses `scripts/postgres-replica-init.sh` (avoids variable/shell differences vs Mac). Neo4j and Elasticsearch have longer healthcheck start periods and retries for stable startup.
 
 Full step-by-step and optional services (R2, SMTP, Turnstile, Google Login, LiveKit, MinIO policies): **[Self-Host with Pre-Built Images](https://docs.bellamybook.com/docs/self-host/installation/docker-publish)**.
 
@@ -141,6 +143,7 @@ For **step-by-step** setup of the three env files and all options, read the docu
 
 | What | Docs |
 |------|------|
+| **Traefik dynamic file** — edit `traefik/dynamic/traefik-dynamic.yml` for your domain (www redirect placeholders) | [Traefik when you deploy](https://docs.bellamybook.com/docs/self-host/installation/traefik-when-you-deploy), [TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md) |
 | Environment variables, JWT, databases, storage | [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) |
 | JWT secret (required for login) | [JWT](https://docs.bellamybook.com/docs/self-host/configuration/jwt) |
 | **MinIO (default storage for self-host)** — set `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and `Minio__PublicUrl` in `.env`. Or use R2. | [Storage](https://docs.bellamybook.com/docs/self-host/configuration/storage), [R2 Setup](https://docs.bellamybook.com/docs/self-host/configuration/r2-setup) |
