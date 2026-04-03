@@ -33,11 +33,11 @@ http:
       rule: "Host(`www.your-domain.com`)"
       entryPoints: ["web"]
       middlewares: ["redirect-www-to-canonical"]
-      service: "frontend@docker"
+      service: "frontend-www-proxy@file"
     # www -> canonical redirect (HTTPS)
     frontend-www-redirect-secure:
       rule: "Host(`www.your-domain.com`)"
       entryPoints: ["websecure"]
       middlewares: ["redirect-www-to-canonical"]
-      service: "frontend@docker"
+      service: "frontend-www-proxy@file"
       tls: true
