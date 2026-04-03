@@ -28,16 +28,21 @@ http:
         replacement: "https://your-domain.com/${1}"
         permanent: true
   routers:
-    # www -> canonical redirect (HTTP). Replace www.your-domain.com with your www host.
+    # HTTP redirect
     frontend-www-redirect:
       rule: "Host(`www.your-domain.com`)"
-      entryPoints: ["web"]
-      middlewares: ["redirect-www-to-canonical"]
-      service: noop@internal
-    # www -> canonical redirect (HTTPS)
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-www-to-canonical
+      service: "noop@internal"
+
+    # HTTPS redirect
     frontend-www-redirect-secure:
       rule: "Host(`www.your-domain.com`)"
-      entryPoints: ["websecure"]
-      middlewares: ["redirect-www-to-canonical"]
-      service: noop@internal
+      entryPoints:
+        - websecure
+      middlewares:
+        - redirect-www-to-canonical
+      service: "noop@internal"
       tls: true
