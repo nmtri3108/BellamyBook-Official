@@ -11,14 +11,15 @@ entryPoints:
   web:
     address: ":80"
     # Optional: if backends need encoded chars in path (RFC 3986), set e.g. http.encodedCharacters.allowEncodedSlash: true
-    # Uncomment to redirect HTTP -> HTTPS (when using TLS)
-    # http:
-    #   redirections:
-    #     entryPoint:
-    #       to: websecure
-    #       scheme: https
+    # Keep HTTP available at origin to avoid redirect loops when CDN/origin protocol is misconfigured.
+    # Enforce HTTPS at CDN layer first; re-enable origin redirect after confirming Cloudflare->origin HTTPS.
   websecure:
     address: ":443"
+    # Apply security middleware only on HTTPS traffic.
+    # This keeps local/dev HTTP flows free from HSTS while enabling it in production TLS.
+    http:
+      middlewares:
+        - security-headers@file
   dashboard:
     address: ":8080"
   metrics:

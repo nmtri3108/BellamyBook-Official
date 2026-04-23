@@ -24,7 +24,7 @@
 
 | Link | Description |
 |------|-------------|
-| [**Landing**](https://bellamybook.com/landing) | Product overview and features |
+| [**Landing**](https://bellamybook.com/landing) | Product overview and features (self-hosted social network) |
 | [**Demo**](https://bellamybook.com) | Try the app live |
 | [**Docs**](https://docs.bellamybook.com) | Full documentation: installation, configuration, R2, SMTP, Turnstile, LiveKit, Google Login, and more |
 | [**Docker Hub**](https://hub.docker.com/u/bellamy31) | Pre-built images (`bellamy31/bellamybook-*`) for self-hosting |
