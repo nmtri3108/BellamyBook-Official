@@ -8,11 +8,32 @@ http:
       headers:
         browserXssFilter: true
         contentTypeNosniff: true
+        forceSTSHeader: true
         frameDeny: true
         stsIncludeSubdomains: true
         stsPreload: true
         stsSeconds: 31536000
         customFrameOptionsValue: "SAMEORIGIN"
+        # CSP:
+        # - Remove overly broad scheme wildcards (http:/https:) for ZAP "Wildcard Directive"
+        # - Remove unsafe-eval
+        # - Avoid unsafe-inline for scripts (allow the remaining JSON-LD inline via sha256 hash)
+        # - Keep style-src unsafe-inline because the SPA uses inline style attributes widely (React style=...).
+        contentSecurityPolicy: >-
+          default-src 'self';
+          base-uri 'self';
+          form-action 'self';
+          frame-ancestors 'self';
+          object-src 'none';
+          script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com 'sha256-moDbv07acSvk+VU611N7FxgaHyg/VpA9rFmAPT3cfj0=';
+          style-src 'self' 'unsafe-inline';
+          font-src 'self' data:;
+          img-src 'self' data: blob:;
+          connect-src 'self' https://cloudflareinsights.com wss://your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
+          frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com;
+          worker-src 'self' blob:;
+          manifest-src 'self';
+          media-src 'self' blob:
     # WebSocket support for SignalR (Traefik auto-detects Upgrade: websocket header)
     # No special config needed - Traefik handles WebSocket upgrades automatically
     # This middleware can be attached if needed for additional headers

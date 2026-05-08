@@ -4,7 +4,7 @@
 # Set LOG_RETENTION_DAYS (default 5) to control how long logs are kept; older indices are deleted automatically.
 
 set -e
-OPENSEARCH_URL="${OPENSEARCH_URL:-http://elasticsearch:9200}"
+OPENSEARCH_URL="${OPENSEARCH_URL:-http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200}"
 LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-5}"
 MAX_RETRIES=30
 RETRY_DELAY=5
