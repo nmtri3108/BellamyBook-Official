@@ -50,6 +50,15 @@ Clone or download **this folder** (the self-host kit). You need: `docker-compose
 
 **Traefik (production):** Before you rely on Traefik on a server, edit **`traefik/dynamic/traefik-dynamic.yml`**. It ships with placeholder hostnames (`your-domain.com`, `www.your-domain.com`) for optional **www → canonical** SEO redirects and security middleware. Replace those with your real domain, or remove or comment out the `redirect-www-to-canonical` middleware and the `frontend-www-redirect` routers if you do not use `www`. If you skip this, `www` traffic may redirect to the wrong host. Details: **[TRAEFIK_DEPLOY.md](TRAEFIK_DEPLOY.md)** and [Make sure Traefik works when you deploy](https://docs.bellamybook.com/docs/self-host/installation/traefik-when-you-deploy).
 
+**Security update checklist (important):** after pulling new tags/config, review these files together:
+
+- `.env` (new required keys such as `ELASTICSEARCH_PASSWORD`; `git pull` does not merge into existing `.env`)
+- `traefik/traefik.yml`
+- `traefik/dynamic/traefik-dynamic.yml`
+- `Src/frontend/nginx.conf` and `Src/admin/nginx.conf` (CSP allowlist for API/WS/storage/GA/Turnstile)
+
+Frontend/admin CSP is generated at container startup from `.env` URL values, so most domain/storage changes do not require image rebuild.
+
 ### 2. Configure environment (3 env files)
 
 This kit uses **three** environment files for different roles:
@@ -76,10 +85,15 @@ Edit `.env` and set at least:
 - **Your domain:** `API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, and all `TRAEFIK_*_HOST` to your hostnames. Use your real public URLs (not localhost) so robots.txt and sitemap point to your site for search engines.
 - **Secrets:** Replace every `CHANGE_ME_*` — Postgres, Redis, MongoDB, Neo4j, RabbitMQ, **MinIO** (`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`), and **JWT** (`JwtSettings__Secret`, e.g. `openssl rand -base64 64`).
 - **MinIO (required for self-host when using default storage):** The stack uses MinIO by default for avatars, posts, and media. You must set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`, and set `Minio__PublicUrl` so the frontend can load media — e.g. `Minio__PublicUrl=http://localhost:9000` for local testing, or `Minio__PublicUrl=https://${TRAEFIK_MINIO_HOST}` when using Traefik. See `.env.example` and [Storage](https://docs.bellamybook.com/docs/self-host/configuration/storage) in the docs.
+- **If using MinIO instead of R2:** keep `Storage__Provider=MinIO`, set `Minio__Endpoint=minio:9000`, configure `Minio__PublicUrl`, and ensure MinIO buckets (`public`, `private`) are created and policy is correct. `minio-init` creates default buckets on first run. Quick steps: [Self-Host with Pre-Built Images](https://docs.bellamybook.com/docs/self-host/installation/docker-publish#26-if-you-self-host-with-minio-instead-of-r2).
+- **Subdomain rule (important):** choose and set exactly one public storage subdomain in config + CSP:
+  - R2: `r2.yourdomain.com`
+  - MinIO: `minio.yourdomain.com`
+  Ensure DNS, `Minio__PublicUrl`/`R2__PublicUrl`, and CSP allowlists all use the same hostname.
 
 For full details and step-by-step guidance, see the [Environment](https://docs.bellamybook.com/docs/self-host/configuration/environment) and [configuration checklist](https://docs.bellamybook.com/docs/self-host/configuration/environment#configuration-checklist) in the docs.
 
-**Runtime config (optional).** In the same `.env` you can set Turnstile, Google OAuth, LiveKit, and Web Push so they apply when frontend and admin start — no image rebuild. See the **"FRONTEND & ADMIN RUNTIME"** section in `.env.example` (`VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_LIVEKIT_URL`, `VITE_VAPID_PUBLIC_KEY`, and optional Turnstile theme/size/endpoints). After editing, run `docker compose up -d frontend admin` to apply.
+**Runtime config (optional).** In the same `.env` you can set Turnstile, Google OAuth, LiveKit, Web Push, and CSP extra allowlists so they apply when frontend and admin start — no image rebuild. See the **"FRONTEND & ADMIN RUNTIME"** section in `.env.example` (`VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_LIVEKIT_URL`, `VITE_VAPID_PUBLIC_KEY`, `CSP_EXTRA_*`, and optional Turnstile theme/size/endpoints). After editing, run `docker compose up -d frontend admin` to apply.
 
 ### 3. Create MongoDB keyfile (required)
 

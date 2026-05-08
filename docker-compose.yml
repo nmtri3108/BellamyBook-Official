@@ -473,6 +473,7 @@ services:
       # For robots.txt/sitemap the API can fall back to the request Host when these are wrong, but the rest of the app needs them.
       AppSettings__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
       Frontend__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
+      Frontend__AdminBaseUrl: ${ADMIN_PUBLIC_URL:-}
       Frontend__ApiBaseUrl: ${API_PUBLIC_URL:-}/api
       Frontend__CorsOrigins__0: ${FRONTEND_PUBLIC_URL:-}
       Frontend__CorsOrigins__1: ${ADMIN_PUBLIC_URL:-}
