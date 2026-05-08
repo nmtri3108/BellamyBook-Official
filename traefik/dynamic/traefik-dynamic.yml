@@ -29,7 +29,7 @@ http:
           style-src 'self' 'unsafe-inline';
           font-src 'self' data:;
           img-src 'self' data: blob:;
-          connect-src 'self' https://cloudflareinsights.com wss://your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
+          connect-src 'self' https://cloudflareinsights.com https://api.your-domain.com https://admin.your-domain.com https://docs.your-domain.com wss://your-domain.com wss://api.your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
           frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com;
           worker-src 'self' blob:;
           manifest-src 'self';
