@@ -297,7 +297,8 @@ services:
     restart: unless-stopped
     environment:
       discovery.type: single-node
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      # Increase heap to reduce OOM/restart loops on production datasets.
+      ES_JAVA_OPTS: "${ELASTICSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}"
       xpack.security.enabled: "true"
       ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD}
     volumes:
@@ -324,6 +325,8 @@ services:
       OPENSEARCH_URL: http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
       # Log retention: delete indices older than N days (default 5). Reduces OpenSearch/Elasticsearch data.
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-5}
+      # Single-node default to avoid RED cluster due to unassigned replicas.
+      ELASTICSEARCH_REPLICAS: ${ELASTICSEARCH_REPLICAS:-0}
     volumes:
       - ./opensearch-config/setup-log-retention-docker.sh:/setup-log-retention.sh:ro
     entrypoint: ["/bin/sh", "-c"]

@@ -6,6 +6,7 @@
 set -e
 OPENSEARCH_URL="${OPENSEARCH_URL:-http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200}"
 LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-5}"
+ELASTICSEARCH_REPLICAS="${ELASTICSEARCH_REPLICAS:-0}"
 MAX_RETRIES=30
 RETRY_DELAY=5
 GREEN='\033[0;32m'
@@ -80,6 +81,11 @@ else
   echo -e "${GREEN}Using Elasticsearch ILM API${NC}"
 fi
 
+echo -e "\n${YELLOW}Applying single-node replica setting (number_of_replicas=${ELASTICSEARCH_REPLICAS})...${NC}"
+RESPONSE=$(curl -s -w '\n%{http_code}' -X PUT "$OPENSEARCH_URL/_all/_settings" \
+  -H "Content-Type: application/json" -d "{\"index\":{\"number_of_replicas\":${ELASTICSEARCH_REPLICAS}}}")
+check_response "$RESPONSE" || true
+
 ILM_NAME="log-retention-${LOG_RETENTION_DAYS}days"
 
 if [ "$CLUSTER_TYPE" = "elasticsearch" ]; then
@@ -94,14 +100,14 @@ RESPONSE=$(curl -s -w '\n%{http_code}' -X PUT "$OPENSEARCH_URL/$ILM_POLICY_ENDPO
 check_response "$RESPONSE" || true
 
 echo -e "\n${YELLOW}Creating index templates...${NC}"
-INDEX_PATTERNS="applogs-* websocket-worker-logs-* graph-worker-logs-* scoring-worker-logs-* trending-worker-logs-* hashtag-worker-logs-* elasticsearch-sync-worker-logs-* media-worker-logs-* interaction-worker-logs-* chat-worker-logs-* expo-push-worker-logs-* webpush-worker-logs-* blog-autogen-worker-logs-*"
+INDEX_PATTERNS="applogs-* websocket-worker-logs-* graph-worker-logs-* scoring-worker-logs-* trending-worker-logs-* hashtag-worker-logs-* elasticsearch-sync-worker-logs-* media-worker-logs-* interaction-worker-logs-* chat-worker-logs-* expo-push-worker-logs-* webpush-worker-logs-* blog-auto-generation-worker-logs-*"
 TEMPLATES_CREATED=0
 for INDEX_PATTERN in $INDEX_PATTERNS; do
   TEMPLATE_NAME="${INDEX_PATTERN%-*}-template"
   if [ "$CLUSTER_TYPE" = "elasticsearch" ]; then
-    INDEX_TEMPLATE_JSON="{\"index_patterns\":[\"$INDEX_PATTERN\"],\"template\":{\"settings\":{\"index.lifecycle.name\":\"$ILM_NAME\"}},\"priority\":200}"
+    INDEX_TEMPLATE_JSON="{\"index_patterns\":[\"$INDEX_PATTERN\"],\"template\":{\"settings\":{\"index.lifecycle.name\":\"$ILM_NAME\",\"number_of_replicas\":${ELASTICSEARCH_REPLICAS}}},\"priority\":200}"
   else
-    INDEX_TEMPLATE_JSON="{\"index_patterns\":[\"$INDEX_PATTERN\"],\"template\":{\"settings\":{\"plugins.index_state_management.policy_id\":\"$ILM_NAME\"}},\"priority\":200}"
+    INDEX_TEMPLATE_JSON="{\"index_patterns\":[\"$INDEX_PATTERN\"],\"template\":{\"settings\":{\"plugins.index_state_management.policy_id\":\"$ILM_NAME\",\"number_of_replicas\":${ELASTICSEARCH_REPLICAS}}},\"priority\":200}"
   fi
   RESPONSE=$(curl -s -w '\n%{http_code}' -X PUT "$OPENSEARCH_URL/_index_template/$TEMPLATE_NAME" -H "Content-Type: application/json" -d "$INDEX_TEMPLATE_JSON")
   if check_response "$RESPONSE"; then
@@ -120,9 +126,9 @@ for INDEX_PATTERN in $INDEX_PATTERNS; do
   while IFS= read -r INDEX; do
     if [ -n "$INDEX" ]; then
       if [ "$CLUSTER_TYPE" = "elasticsearch" ]; then
-        UPDATE_SETTINGS_JSON="{\"index.lifecycle.name\":\"$ILM_NAME\"}"
+        UPDATE_SETTINGS_JSON="{\"index.lifecycle.name\":\"$ILM_NAME\",\"index.number_of_replicas\":${ELASTICSEARCH_REPLICAS}}"
       else
-        UPDATE_SETTINGS_JSON="{\"plugins.index_state_management.policy_id\":\"$ILM_NAME\"}"
+        UPDATE_SETTINGS_JSON="{\"plugins.index_state_management.policy_id\":\"$ILM_NAME\",\"index.number_of_replicas\":${ELASTICSEARCH_REPLICAS}}"
       fi
       RESPONSE=$(curl -s -w '\n%{http_code}' -X PUT "$OPENSEARCH_URL/$INDEX/_settings" \
         -H "Content-Type: application/json" -d "$UPDATE_SETTINGS_JSON")
