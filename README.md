@@ -95,6 +95,8 @@ For full details and step-by-step guidance, see the [Environment](https://docs.b
 
 **Runtime config (optional).** In the same `.env` you can set Turnstile, Google OAuth, LiveKit, Web Push, and CSP extra allowlists so they apply when frontend and admin start — no image rebuild. See the **"FRONTEND & ADMIN RUNTIME"** section in `.env.example` (`VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_LIVEKIT_URL`, `VITE_VAPID_PUBLIC_KEY`, `CSP_EXTRA_*`, and optional Turnstile theme/size/endpoints). After editing, run `docker compose up -d frontend admin` to apply.
 
+`CSP_EXTRA_*` can be left empty. CSP is still strict by default and generated at startup from core URLs (`API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, `DOCS_PUBLIC_URL`, `Minio__PublicUrl`/`R2__PublicUrl`). Only use `CSP_EXTRA_*` when you need to allow additional third-party domains.
+
 ### 3. Create MongoDB keyfile (required)
 
 The stack uses a **MongoDB replica set** for the app and workers. MongoDB requires a **keyfile** for replica set authentication. This file **must be created before your first `docker compose up`**. The `docker-compose.yml` mounts this keyfile into the `mongo-keyfile-init` service, which then copies it into a volume used by the MongoDB container.
