@@ -6,34 +6,52 @@ http:
   middlewares:
     security-headers:
       headers:
-        browserXssFilter: true
+        # X-XSS-Protection (browserXssFilter) is deprecated; CSP does the real work.
+        browserXssFilter: false
         contentTypeNosniff: true
         forceSTSHeader: true
-        frameDeny: true
+        # 2 years + preload — eligible for hstspreload.org submission (manual).
         stsIncludeSubdomains: true
         stsPreload: true
-        stsSeconds: 31536000
+        stsSeconds: 63072000
+        # frameDeny is overridden by customFrameOptionsValue below.
+        frameDeny: false
         customFrameOptionsValue: "SAMEORIGIN"
-        # CSP:
-        # - Remove overly broad scheme wildcards (http:/https:) for ZAP "Wildcard Directive"
-        # - Remove unsafe-eval
-        # - Avoid unsafe-inline for scripts (allow the remaining JSON-LD inline via sha256 hash)
-        # - Keep style-src unsafe-inline because the SPA uses inline style attributes widely (React style=...).
+        # Tighten referrer leak: send origin cross-site, never full URL.
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customResponseHeaders:
+          # See dockerProd/traefik/dynamic/traefik-dynamic.yml for the full
+          # rationale — the same comments apply here verbatim.
+          Permissions-Policy: "camera=(self), microphone=(self), display-capture=(self), geolocation=(self), payment=(), usb=(), bluetooth=(), serial=(), hid=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), idle-detection=(), screen-wake-lock=(self)"
+          Cross-Origin-Opener-Policy: "same-origin"
+          Cross-Origin-Resource-Policy: "same-site"
+        # CSP design — strict but not user-hostile. Full per-directive rationale
+        # lives in dockerProd/traefik/dynamic/traefik-dynamic.yml; the same
+        # caveats apply here. Key items:
+        # - script-src + script-src-elem both carry the JSON-LD sha256 hash;
+        #   regenerate when editing the inline schema in Src/frontend/index.html.
+        # - script-src-attr 'none' — React doesn't need inline event handlers.
+        # - frame-src omits 'self' — frame-ancestors already covers it.
+        # - img-src / media-src include `https:` (intentional UX trade-off).
+        # - upgrade-insecure-requests auto-promotes user-pasted http:// links.
         contentSecurityPolicy: >-
           default-src 'self';
           base-uri 'self';
           form-action 'self';
           frame-ancestors 'self';
           object-src 'none';
-          script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com 'sha256-moDbv07acSvk+VU611N7FxgaHyg/VpA9rFmAPT3cfj0=';
+          script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com 'sha256-QiE76tkPgSRcnqaJbaFxIGa+JmVG0gmw+ifJn5emBsA=';
+          script-src-elem 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com 'sha256-QiE76tkPgSRcnqaJbaFxIGa+JmVG0gmw+ifJn5emBsA=';
+          script-src-attr 'none';
           style-src 'self' 'unsafe-inline';
           font-src 'self' data:;
-          img-src 'self' data: blob:;
-          connect-src 'self' https://cloudflareinsights.com https://api.your-domain.com https://admin.your-domain.com https://docs.your-domain.com wss://your-domain.com wss://api.your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
-          frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com;
+          img-src 'self' data: blob: https:;
+          connect-src 'self' https://cloudflareinsights.com https://www.google-analytics.com https://region1.google-analytics.com https://api.your-domain.com https://admin.your-domain.com https://docs.your-domain.com wss://your-domain.com wss://api.your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
+          frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.tiktok.com https://platform.twitter.com https://open.spotify.com https://player.twitch.tv https://clips.twitch.tv https://w.soundcloud.com;
           worker-src 'self' blob:;
           manifest-src 'self';
-          media-src 'self' blob:
+          media-src 'self' blob: https:;
+          upgrade-insecure-requests
     # WebSocket support for SignalR (Traefik auto-detects Upgrade: websocket header)
     # No special config needed - Traefik handles WebSocket upgrades automatically
     # This middleware can be attached if needed for additional headers
