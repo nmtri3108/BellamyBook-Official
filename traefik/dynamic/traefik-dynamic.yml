@@ -30,7 +30,10 @@ http:
         # caveats apply here. Key items:
         # - script-src + script-src-elem both carry the JSON-LD sha256 hash;
         #   regenerate when editing the inline schema in Src/frontend/index.html.
-        # - script-src-attr 'none' — React doesn't need inline event handlers.
+        # - script-src-attr 'unsafe-inline' — required by some 3rd-party widgets
+        #   (GTM Custom HTML / react-bootstrap / Plyr / LiveKit) that emit inline
+        #   onclick attributes; verified breakage on /feed/home when set to 'none'.
+        #   See dockerProd/traefik/dynamic/traefik-dynamic.yml for full notes.
         # - frame-src omits 'self' — frame-ancestors already covers it.
         # - img-src / media-src include `https:` (intentional UX trade-off).
         # - upgrade-insecure-requests auto-promotes user-pasted http:// links.
@@ -42,7 +45,7 @@ http:
           object-src 'none';
           script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com 'sha256-QiE76tkPgSRcnqaJbaFxIGa+JmVG0gmw+ifJn5emBsA=';
           script-src-elem 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com 'sha256-QiE76tkPgSRcnqaJbaFxIGa+JmVG0gmw+ifJn5emBsA=';
-          script-src-attr 'none';
+          script-src-attr 'unsafe-inline';
           style-src 'self' 'unsafe-inline';
           font-src 'self' data:;
           img-src 'self' data: blob: https:;
