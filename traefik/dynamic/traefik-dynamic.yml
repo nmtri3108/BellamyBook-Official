@@ -37,6 +37,11 @@ http:
         # - frame-src omits 'self' — frame-ancestors already covers it.
         # - img-src / media-src include `https:` (intentional UX trade-off).
         # - upgrade-insecure-requests auto-promotes user-pasted http:// links.
+        # - connect-src includes:
+        #     https://*.livekit.cloud wss://*.livekit.cloud  (any LiveKit Cloud
+        #       project: signaling, /rtc/validate, TURN, region routing)
+        #     https://nominatim.openstreetmap.org  (CheckIn post reverse-geocoding
+        #       — without this, CheckIn shows lat/lng but blank address)
         contentSecurityPolicy: >-
           default-src 'self';
           base-uri 'self';
@@ -49,7 +54,7 @@ http:
           style-src 'self' 'unsafe-inline';
           font-src 'self' data:;
           img-src 'self' data: blob: https:;
-          connect-src 'self' https://cloudflareinsights.com https://www.google-analytics.com https://region1.google-analytics.com https://api.your-domain.com https://admin.your-domain.com https://docs.your-domain.com wss://your-domain.com wss://api.your-domain.com wss://bellamy-book-dmhbvg4h.livekit.cloud;
+          connect-src 'self' https://cloudflareinsights.com https://www.google-analytics.com https://region1.google-analytics.com https://api.your-domain.com https://admin.your-domain.com https://docs.your-domain.com wss://your-domain.com wss://api.your-domain.com https://*.livekit.cloud wss://*.livekit.cloud https://nominatim.openstreetmap.org;
           frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.tiktok.com https://platform.twitter.com https://open.spotify.com https://player.twitch.tv https://clips.twitch.tv https://w.soundcloud.com;
           worker-src 'self' blob:;
           manifest-src 'self';
