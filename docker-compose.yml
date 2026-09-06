@@ -496,6 +496,8 @@ services:
       # Neo4j (graph features; set Neo4j__Password in .env to match password in NEO4J_AUTH)
       Neo4j__ConnectionString: bolt://neo4j:7687
       Neo4j__Username: neo4j
+      # Content moderation: set ContentModeration__* in .env (env_file). Do not default
+      # Enabled to false here — that overrides env_file and disables the feature.
     depends_on:
       postgres-primary: { condition: service_healthy }
       redis: { condition: service_started }
@@ -793,6 +795,25 @@ services:
     networks:
       - appnet
 
+  # Native GPT content moderation worker (enable via ContentModeration__Enabled=true)
+  content-moderation-worker:
+    image: ${DOCKER_REGISTRY}/bellamybook-content-moderation-worker:${IMAGE_TAG}
+    container_name: ${COMPOSE_PROJECT_NAME:-bellamybook}-content-moderation-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:80
+      # ContentModeration__* from env_file (.env) only — avoid :-false override
+      Frontend__AdminBaseUrl: ${ADMIN_PUBLIC_URL:-}
+      Frontend__BaseUrl: ${FRONTEND_PUBLIC_URL:-}
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      postgres-primary: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks:
+      - appnet
+
   # ---------------------------------------------------------------------------
   # FRONTEND (runtime config from .env – set below; no rebuild needed for URLs/keys)
   # ---------------------------------------------------------------------------
@@ -818,6 +839,8 @@ services:
       VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
       VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-}
       VITE_VAPID_PUBLIC_KEY: ${VITE_VAPID_PUBLIC_KEY:-}
+      # Self-host: `/` → sign-in (not marketing landing). Set true only if you want the product landing page.
+      VITE_SHOW_MARKETING_LANDING: ${VITE_SHOW_MARKETING_LANDING:-false}
       CSP_EXTRA_SCRIPT_SRC: ${CSP_EXTRA_SCRIPT_SRC:-}
       CSP_EXTRA_SCRIPT_ELEM_SRC: ${CSP_EXTRA_SCRIPT_ELEM_SRC:-}
       CSP_EXTRA_IMG_SRC: ${CSP_EXTRA_IMG_SRC:-}

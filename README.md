@@ -37,7 +37,7 @@
 
 - **Your data, your server** — Full control over users and content.
 - **Your domain** — Run at `app.yourdomain.com` with your branding.
-- **Storage** — MinIO is the default for self-host (avatars, posts, media); configure MinIO credentials and `Minio__PublicUrl` in `.env`. Alternatively use Cloudflare R2. Optional: SMTP, Turnstile, LiveKit, Google Login.
+- **Storage** — MinIO is the default for self-host (avatars, posts, media); configure MinIO credentials and `Minio__PublicUrl` in `.env`. Alternatively use Cloudflare R2. Optional: SMTP, Turnstile, LiveKit, Google Login, **native GPT content moderation**.
 - **One compose, one `.env`** — No build step; pull images, configure, run. **Runtime config** — Set Turnstile, Google OAuth, LiveKit, and Web Push keys in `.env`; they apply when frontend and admin start (no image rebuild).
 
 ---
@@ -52,12 +52,11 @@ Clone or download **this folder** (the self-host kit). You need: `docker-compose
 
 **Security update checklist (important):** after pulling new tags/config, review these files together:
 
-- `.env` (new required keys such as `ELASTICSEARCH_PASSWORD`; `git pull` does not merge into existing `.env`)
+- `.env` (new keys such as `ELASTICSEARCH_PASSWORD`, `ContentModeration__*`, `LiveChat__OpenAiApiKey`; `git pull` does not merge into an existing `.env`)
+- `docker-compose.yml` (new services such as `content-moderation-worker`)
 - `traefik/traefik.yml`
 - `traefik/dynamic/traefik-dynamic.yml`
-- `Src/frontend/nginx.conf` and `Src/admin/nginx.conf` (CSP allowlist for API/WS/storage/GA/Turnstile)
-
-Frontend/admin CSP is generated at container startup from `.env` URL values, so most domain/storage changes do not require image rebuild.
+- Frontend/admin CSP is generated at container startup from `.env` URL values, so most domain/storage changes do not require image rebuild.
 
 ### 2. Configure environment (3 env files)
 
@@ -95,7 +94,11 @@ For full details and step-by-step guidance, see the [Environment](https://docs.b
 
 **Runtime config (optional).** In the same `.env` you can set Turnstile, Google OAuth, LiveKit, Web Push, and CSP extra allowlists so they apply when frontend and admin start — no image rebuild. See the **"FRONTEND & ADMIN RUNTIME"** section in `.env.example` (`VITE_TURNSTILE_SITE_KEY`, `VITE_GOOGLE_CLIENT_ID`, `VITE_LIVEKIT_URL`, `VITE_VAPID_PUBLIC_KEY`, `CSP_EXTRA_*`, and optional Turnstile theme/size/endpoints). After editing, run `docker compose up -d frontend admin` to apply.
 
+**Homepage `/`:** Self-host defaults to `VITE_SHOW_MARKETING_LANDING=false` so guests are sent to **sign-in** (community app). The official Bellamy Book site uses `true` (marketing landing). Set `true` in `.env` only if you want the product landing page as your root.
+
 `CSP_EXTRA_*` can be left empty. CSP is still strict by default and generated at startup from core URLs (`API_PUBLIC_URL`, `FRONTEND_PUBLIC_URL`, `ADMIN_PUBLIC_URL`, `DOCS_PUBLIC_URL`, `Minio__PublicUrl`/`R2__PublicUrl`). Only use `CSP_EXTRA_*` when you need to allow additional third-party domains.
+
+**Content moderation (optional).** To auto-scan posts and stories with OpenAI GPT, set `ContentModeration__Enabled=true` and an OpenAI API key in `.env`. See **[Content moderation](#content-moderation-native-gpt)** below and [docs](https://docs.bellamybook.com/docs/self-host/configuration/content-moderation).
 
 ### 3. Create MongoDB keyfile (required)
 
@@ -168,18 +171,115 @@ For **step-by-step** setup of the three env files and all options, read the docu
 | CAPTCHA on login/register | [Turnstile](https://docs.bellamybook.com/docs/self-host/configuration/turnstile) |
 | Sign in with Google | [Google OAuth](https://docs.bellamybook.com/docs/self-host/configuration/google-oauth) |
 | Voice and video calls | [LiveKit](https://docs.bellamybook.com/docs/self-host/configuration/livekit) |
+| **Content moderation** (native GPT for posts & stories) | [Content moderation](https://docs.bellamybook.com/docs/self-host/configuration/content-moderation), [guide](https://docs.bellamybook.com/docs/guides/content-moderation) |
 | Kafka (workers, "topic does not exist", Connection refused) | See **dockerProd/KAFKA_TROUBLESHOOTING.md** (bootstrap `kafka:29092`, topic creation via kafka-init) |
+
+---
+
+## Content moderation (native GPT)
+
+Optional. When enabled, new **posts** and **stories** are held as **Pending + hidden**, queued over RabbitMQ to **`content-moderation-worker`**, scored by OpenAI GPT (caption text + image vision; video frames skipped in v1), then approved or rejected. Admins review alerts in **Admin → Content → Content Alerts**.
+
+There is **no** external ContentDetect / Ollama service — everything runs in this stack with your OpenAI key.
+
+### Enable
+
+1. In `.env` (from `.env.example`):
+
+```bash
+ContentModeration__Enabled=true
+# Optional — if empty, falls back to LiveChat__OpenAiApiKey
+ContentModeration__OpenAiApiKey=sk-your-openai-key
+ContentModeration__Model=gpt-4o-mini
+ContentModeration__NotifyAdminsByEmail=true
+```
+
+2. Ensure SMTP works if you want admin email alerts (`ContentModeration__NotifyAdminsByEmail=true`).
+3. Pull/restart so the new worker image is running:
+
+```bash
+docker compose pull content-moderation-worker api
+docker compose up -d content-moderation-worker api
+```
+
+`docker-compose.yml` already includes `content-moderation-worker`. Both **api** and the worker load `ContentModeration__*` from **`env_file: .env`** (do not rely on compose `environment:` defaults — an older `:-false` override could disable moderation even when `.env` looked correct).
+
+### Severity behavior
+
+| Level | What happens |
+|-------|----------------|
+| **high** | Stay hidden (Rejected); admin alert; notify creator |
+| **low / medium** | Approve + unhide; admin alert (+ email if enabled); notify creator |
+| **none** | Approve + unhide; normal feed / friend notifications |
+
+### Admin
+
+Open **Admin → Content → Content Alerts** to review, hide, unhide, delete, or dismiss alerts (posts and stories). Manual user reports still use the existing moderation APIs.
+
+Full detail: [Content moderation (self-host)](https://docs.bellamybook.com/docs/self-host/configuration/content-moderation) · [Guide](https://docs.bellamybook.com/docs/guides/content-moderation).
 
 ---
 
 ## Updating
 
-Set `IMAGE_TAG` in `.env` to the new tag (e.g. `v1.0.1`), then:
+Set `IMAGE_TAG` in `.env` to the new tag (e.g. `v1.1.0`), then:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
+
+After upgrading, merge any **new keys** from `.env.example` into your `.env` (especially `ContentModeration__*` and Live Chat OpenAI fields). Then run `docker compose run --rm db-migration` if the release notes say a schema update is required.
+
+---
+
+## Release notes
+
+> Self-host operators: **this section is the source of truth** for kit / image upgrades.  
+> Full product changelog (docs site): [Release notes](https://docs.bellamybook.com/release-notes).  
+> A GitHub Release is **optional** (nice for tags & notifications) — you do **not** need GitHub to document or ship a self-host update.
+
+### v1.1.0 — Content safety & UI refresh (major)
+
+**Protect your community from harmful content.** This is a major self-host release: optional **native GPT moderation** keeps inappropriate posts/stories out of feeds until they pass review, with clearer member UI and an Admin Content Alerts queue. Corresponds to **Release 2** on the [docs release notes](https://docs.bellamybook.com/release-notes).
+
+#### Why upgrade
+
+| Benefit | Detail |
+|---------|--------|
+| **Member protection** | New posts/stories stay hidden while Pending; **high** severity never goes live |
+| **Clear author UX** | “Being moderated” feedback; notify on approve / reject |
+| **Operator control** | Admin → Content Alerts (dismiss / hide / unhide / delete) |
+| **Self-host native** | API + `content-moderation-worker` + OpenAI — no external ContentDetect service |
+
+#### Self-host kit / images
+
+- **Native GPT content moderation** — Optional OpenAI pipeline for posts and stories via `content-moderation-worker` (RabbitMQ). Configure with `ContentModeration__Enabled`, `ContentModeration__OpenAiApiKey` (or reuse `LiveChat__OpenAiApiKey`), `ContentModeration__Model`, `ContentModeration__NotifyAdminsByEmail`. See [Content moderation](#content-moderation-native-gpt).
+- **New image:** `bellamybook-content-moderation-worker` (pulled with the rest of the stack when `IMAGE_TAG` is updated).
+- **Live Chat** — Docs assistant uses in-process OpenAI (`LiveChat__OpenAiApiKey`, `LiveChat__Model`, `LiveChat__DocsPath`) instead of the old n8n webhook settings. Disabled by default for self-host.
+- **Compose / `.env.example`** — Content moderation and Live Chat OpenAI keys documented; worker wired into `docker-compose.yml`.
+
+#### Admin UI
+
+- **Content Alerts** — Review GPT moderation outcomes (hide / unhide / delete / dismiss) for posts and stories.
+- **Blog editor** — TipTap improvements (tables, image upload/resize, SEO editor, AI generate modal, preview, publish/schedule controls, unsaved-changes guard).
+- **Brand & theme** — Updated Bellamy Book lockup/mark assets; default admin theme **light**.
+
+#### Frontend UI
+
+- Default UI theme **light** (override with runtime / build env if needed).
+- Moderating status on post create when GPT queue is enabled.
+- **Self-host homepage:** `VITE_SHOW_MARKETING_LANDING=false` → `/` goes to sign-in (not marketing landing). Official site keeps landing.
+- Blog/media and CSP allowlist updates for storage hosts; security header / Traefik dynamic config refreshes in this kit.
+
+#### Upgrade notes
+
+1. `git pull` (or download the new kit) and set `IMAGE_TAG` to `v1.1.0` (or `latest` when published).
+2. Copy new keys from `.env.example` into `.env` — at least the **CONTENT MODERATION** and **LIVE CHAT** blocks if you use those features.
+3. `docker compose pull && docker compose up -d`
+4. Confirm `content-moderation-worker` is up: `docker compose ps content-moderation-worker`
+5. Leave `ContentModeration__Enabled=false` until you have a valid OpenAI key and SMTP (if you want email alerts).
+6. Optional: run `docker compose run --rm db-migration` only if this tag’s notes (or publisher) require a schema update.
 
 ---
 
@@ -215,6 +315,7 @@ Images follow `${DOCKER_REGISTRY}/bellamybook-<service>:${IMAGE_TAG}`. Default r
 | expo-push-worker | bellamybook-expo-push-worker |
 | webpush-worker | bellamybook-webpush-worker |
 | blog-autogen-worker | bellamybook-blog-autogen-worker |
+| content-moderation-worker | bellamybook-content-moderation-worker |
 
 Infrastructure (PostgreSQL, Redis, MongoDB, Kafka, etc.) uses standard public images defined in `docker-compose.yml`.
 
